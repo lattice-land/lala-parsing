@@ -175,12 +175,13 @@ namespace XCSP3Core {
       public:
 
         SF build_formula() {
-          typename F::Sequence seq(variables.size() + constraints.size());
+          typename F::Sequence seq;
+          seq.reserve(variables.size() + constraints.size());
           for(int i = 0; i < variables.size(); ++i) {
-            seq[i] = std::move(variables[i]);
+            seq.push_back(std::move(variables[i]));
           }
           for(int i = 0; i < constraints.size(); ++i) {
-            seq[variables.size() + i] = std::move(constraints[i]);
+            seq.push_back(std::move(constraints[i]));
           }
           auto f = F::make_nary(lala::AND, std::move(seq), ipc_ty);
           if(minimize.has_value() && maximize.has_value()) {
@@ -490,9 +491,10 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
     case ODECIMAL: return F::make_z(static_cast<NodeConstant*>(node)->val);
     case OSYMBOL: throw std::runtime_error("OSYMBOL should not occur in intension constraint");
   }
-  typename F::Sequence seq(node->parameters.size());
-  for(int i = 0; i < seq.size(); ++i) {
-    seq[i] = make_formula(node->parameters[i]);
+  typename F::Sequence seq;
+  seq.reserve(node->parameters.size());
+  for(int i = 0; i < node->parameters.size(); ++i) {
+    seq.push_back(make_formula(node->parameters[i]));
   }
   return F::make_nary(sig, std::move(seq), ipc_ty);
 }

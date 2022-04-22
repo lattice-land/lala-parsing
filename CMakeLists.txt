@@ -13,9 +13,16 @@ endif()
 # Cuda-battery dependency
 
 FetchContent_Declare(
+  cuda_battery
+  GIT_REPOSITORY "https://github.com/lattice-land/cuda-battery.git"
+  GIT_TAG        4c63ed2f3e529d95afe367ee07abd6ce68e0d045
+)
+FetchContent_MakeAvailable(cuda_battery)
+
+FetchContent_Declare(
   lala_core
   GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
-  GIT_TAG        56b5f3edf6f7923c1991e39a25b1bb1e94d0e5e2
+  GIT_TAG        4f2f465df5a979f008cf8d541c486b2386a498f2
 )
 FetchContent_MakeAvailable(lala_core)
 
@@ -55,7 +62,7 @@ endif()
 # Example binary
 
 add_executable(example_xcsp3 example/xcsp3/xcsp3.cpp)
-target_include_directories(example_xcsp3 PRIVATE ${LIBXML2_INCLUDE_DIR} ${lala_parsing_SOURCE_DIR}/include ${xcsp3parser_SOURCE_DIR}/include ${cuda_battery_SOURCE_DIR}/include ${cuda_core_SOURCE_DIR}/include ${thrust_SOURCE_DIR})
+target_include_directories(example_xcsp3 PRIVATE ${LIBXML2_INCLUDE_DIR} ${lala_parsing_SOURCE_DIR}/include ${xcsp3parser_SOURCE_DIR}/include ${cuda_battery_SOURCE_DIR}/include ${lala_core_SOURCE_DIR}/include ${thrust_SOURCE_DIR})
 target_link_libraries(example_xcsp3 PRIVATE xcsp3parser ${LIBXML2_LIBRARIES} cuda_battery lala_core lala_parsing)
 
 # Documentation

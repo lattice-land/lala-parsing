@@ -20,8 +20,8 @@ namespace XCSP3Core {
 
 namespace lala {
   template<class Allocator>
-  SFormula<Allocator> parse_xcsp3(const std::string& filename, AType store_ty, AType ipc_ty) {
-    XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb(store_ty, ipc_ty);
+  SFormula<Allocator> parse_xcsp3(const std::string& filename) {
+    XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb;
     XCSP3Core::XCSP3CoreParser parser(&cb);
     parser.parse(filename.c_str());
     return cb.build_formula();
@@ -50,8 +50,7 @@ namespace XCSP3Core {
         using XCSP3CoreCallbacks::buildObjectiveMinimize;
         using XCSP3CoreCallbacks::buildObjectiveMaximize;
 
-        XCSP3_turbo_callbacks(lala::AType store_ty, lala::AType ipc_ty):
-          XCSP3CoreCallbacks(), canonize(true), store_ty(store_ty), ipc_ty(ipc_ty) {}
+        XCSP3_turbo_callbacks(): XCSP3CoreCallbacks(), canonize(true) {}
 
         virtual void beginInstance(InstanceType type) override;
         virtual void endInstance() override;
@@ -162,9 +161,6 @@ namespace XCSP3Core {
         using SF = lala::SFormula<Allocator>;
 
       private:
-        lala::AType store_ty;
-        lala::AType ipc_ty;
-
         std::vector<F> variables;
         std::vector<F> constraints;
         std::optional<lala::LVar<Allocator>> minimize;
@@ -183,7 +179,7 @@ namespace XCSP3Core {
           for(int i = 0; i < constraints.size(); ++i) {
             seq.push_back(std::move(constraints[i]));
           }
-          auto f = F::make_nary(lala::AND, std::move(seq), ipc_ty);
+          auto f = F::make_nary(lala::AND, std::move(seq));
           if(minimize.has_value() && maximize.has_value()) {
             throw std::runtime_error("Multiple objectives are unsupported.");
           }
@@ -367,9 +363,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, int minVa
   }
 
   lala::LVar<Allocator> lvar(id.c_str());
-  variables.push_back(F::make_exists(store_ty, lvar, lala::Int));
-  constraints.push_back(F::make_binary(F::make_lvar(store_ty, lvar), lala::LEQ, F::make_z(maxValue), store_ty));
-  constraints.push_back(F::make_binary(F::make_lvar(store_ty, lvar), lala::GEQ, F::make_z(minValue), store_ty));
+  variables.push_back(F::make_exists(UNTYPED, lvar, lala::Int));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::LEQ, F::make_z(maxValue)));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::GEQ, F::make_z(minValue)));
 }
 
 template<class Allocator>
@@ -484,7 +480,7 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
     case OSINH:
     case OCOSH:
     case OTANH: throw std::runtime_error("unsupported arithmetic operation");
-    case OVAR: return F::make_lvar(store_ty, LVar<Allocator>(static_cast<NodeVariable*>(node)->var.c_str()));
+    case OVAR: return F::make_lvar(UNTYPED, LVar<Allocator>(static_cast<NodeVariable*>(node)->var.c_str()));
     case OPAR:
     case OLONG:
     case ORATIONAL: throw std::runtime_error("unsupported constant");
@@ -496,7 +492,7 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
   for(int i = 0; i < node->parameters.size(); ++i) {
     seq.push_back(make_formula(node->parameters[i]));
   }
-  return F::make_nary(sig, std::move(seq), ipc_ty);
+  return F::make_nary(sig, std::move(seq));
 }
 
 template<class Allocator>
@@ -532,10 +528,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintPrimitive(string id, Order
   constraints.push_back(
     F::make_binary(
       F::make_binary(
-        F::make_lvar(store_ty, lala::LVar<Allocator>(x->id.c_str())),
+        F::make_lvar(UNTYPED, lala::LVar<Allocator>(x->id.c_str())),
         lala::SUB,
-        F::make_lvar(store_ty, lala::LVar<Allocator>(y->id.c_str())),
-        ipc_ty),
+        F::make_lvar(UNTYPED, lala::LVar<Allocator>(y->id.c_str()))),
       convert(op),
       F::make_z(-k)));
 }
@@ -546,7 +541,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintPrimitive(string id, Order
     cout << "\n   constraint  " << id << ":" << x->id << " op " << k << "\n";
   }
   lala::LVar<Allocator> lvar(x->id.c_str());
-  constraints.push_back(F::make_binary(F::make_lvar(store_ty, lvar), convert(op), F::make_z(k), store_ty));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), convert(op), F::make_z(k)));
 }
 
 template<class Allocator>

@@ -19,11 +19,16 @@ namespace XCSP3Core {
 }
 
 namespace lala {
+ template<class Allocator>
+  void parse_xcsp3(const std::string& filename, XCSP3Core::XCSP3_turbo_callbacks<Allocator> &cb) {
+    XCSP3Core::XCSP3CoreParser parser(&cb);
+    parser.parse(filename.c_str());
+  }
+
   template<class Allocator>
   SFormula<Allocator> parse_xcsp3(const std::string& filename) {
     XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb;
-    XCSP3Core::XCSP3CoreParser parser(&cb);
-    parser.parse(filename.c_str());
+    parse_xcsp3(filename, cb);
     return cb.build_formula();
   }
 }
@@ -169,6 +174,14 @@ namespace XCSP3Core {
         F make_formula(Node* node);
 
       public:
+
+        size_t num_variables() const {
+          return variables.size();
+        }
+
+        size_t num_constraints() const {
+          return constraints.size();
+        }
 
         SF build_formula() {
           typename F::Sequence seq;

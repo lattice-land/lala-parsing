@@ -12,6 +12,7 @@
 #include "XCSP3CoreParser.h"
 
 #include "ast.hpp"
+#include "shared_ptr.hpp"
 
 namespace XCSP3Core {
   template <class Allocator>
@@ -26,7 +27,7 @@ namespace lala {
   }
 
   template<class Allocator>
-  SFormula<Allocator> parse_xcsp3(const std::string& filename) {
+  battery::shared_ptr<SFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename) {
     XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb;
     parse_xcsp3(filename, cb);
     return cb.build_formula();
@@ -183,7 +184,7 @@ namespace XCSP3Core {
           return constraints.size();
         }
 
-        SF build_formula() {
+        battery::shared_ptr<SF, Allocator> build_formula() {
           typename F::Sequence seq;
           seq.reserve(variables.size() + constraints.size());
           for(int i = 0; i < variables.size(); ++i) {
@@ -197,13 +198,13 @@ namespace XCSP3Core {
             throw std::runtime_error("Multiple objectives are unsupported.");
           }
           if(minimize.has_value()) {
-            return SF(std::move(f), SF::MINIMIZE, *minimize);
+            return battery::make_shared<SF, Allocator>(SF(std::move(f), SF::MINIMIZE, *minimize));
           }
           else if(maximize.has_value()) {
-            return SF(std::move(f), SF::MAXIMIZE, *maximize);
+            return battery::make_shared<SF, Allocator>(SF(std::move(f), SF::MAXIMIZE, *maximize));
           }
           else {
-            return SF(std::move(f));
+            return battery::make_shared<SF, Allocator>(SF(std::move(f)));
           }
         }
     };

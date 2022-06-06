@@ -198,10 +198,10 @@ namespace XCSP3Core {
             throw std::runtime_error("Multiple objectives are unsupported.");
           }
           if(minimize.has_value()) {
-            return battery::make_shared<SF, Allocator>(SF(std::move(f), SF::MINIMIZE, *minimize));
+            return battery::make_shared<SF, Allocator>(SF(std::move(f), lala::MINIMIZE, *minimize));
           }
           else if(maximize.has_value()) {
-            return battery::make_shared<SF, Allocator>(SF(std::move(f), SF::MAXIMIZE, *maximize));
+            return battery::make_shared<SF, Allocator>(SF(std::move(f), lala::MAXIMIZE, *maximize));
           }
           else {
             return battery::make_shared<SF, Allocator>(SF(std::move(f)));

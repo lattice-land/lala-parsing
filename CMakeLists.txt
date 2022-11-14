@@ -5,6 +5,12 @@ include(CMakePrintHelpers)
 
 project(lala-parsing LANGUAGES CXX)
 
+# Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:
+# Fix found at https://github.com/ethereum/solidity/pull/13429
+if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 if(NOT DEFINED CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_STANDARD 20)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,7 +21,7 @@ endif()
 FetchContent_Declare(
   cuda_battery
   GIT_REPOSITORY "https://github.com/lattice-land/cuda-battery.git"
-  GIT_TAG        main
+  GIT_TAG        develop
 )
 FetchContent_MakeAvailable(cuda_battery)
 
@@ -37,7 +43,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(xcsp3parser)
 
+# PEG parsing library
+
+set(PEGLIB_BUILD_TESTS OFF CACHE INTERNAL "")
+set(PEGLIB_BUILD_EXAMPLE OFF CACHE INTERNAL "")
+set(PEGLIB_BUILD_LINT OFF CACHE INTERNAL "")
+FetchContent_Declare(
+  cpp-peglib
+  GIT_REPOSITORY "https://github.com/ptal/cpp-peglib.git"
+  GIT_TAG        41132d17764fd7da2f4d4f5eabff3204016cd571
+)
+FetchContent_MakeAvailable(cpp-peglib)
+
 # Preparing the library
+
+# --frounding-math is necessary with GCC because `#pragma STDC FENV_ACCESS ON` does not work.
+# This option will help in making the compiler take into account rounding modes, but bugs persist so floating-point arithmetic on CPUs might not always be sound right now...
+# C.f. https://gcc.gnu.org/bugzilla/show_bug.cgi?id=34678
+IF((CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
+  add_compile_options(-frounding-math)
+ENDIF()
 
 add_library(lala_parsing INTERFACE)
 target_include_directories(lala_parsing INTERFACE include)
@@ -64,6 +89,10 @@ endif()
 add_executable(example_xcsp3 example/xcsp3/xcsp3.cpp)
 target_include_directories(example_xcsp3 PRIVATE ${LIBXML2_INCLUDE_DIR} ${lala_parsing_SOURCE_DIR}/include ${xcsp3parser_SOURCE_DIR}/include ${cuda_battery_SOURCE_DIR}/include ${lala_core_SOURCE_DIR}/include ${thrust_SOURCE_DIR})
 target_link_libraries(example_xcsp3 PRIVATE xcsp3parser ${LIBXML2_LIBRARIES} cuda_battery lala_core lala_parsing)
+
+add_executable(example_flatzinc example/flatzinc/flatzinc.cpp)
+target_include_directories(example_flatzinc PRIVATE ${lala_parsing_SOURCE_DIR}/include ${cuda_battery_SOURCE_DIR}/include ${lala_core_SOURCE_DIR}/include ${cpp-peglib_SOURCE_DIR} ${thrust_SOURCE_DIR})
+target_link_libraries(example_flatzinc PRIVATE cuda_battery lala_core lala_parsing)
 
 # Documentation
 

@@ -11,7 +11,7 @@
 #include "XCSP3Variable.h"
 #include "XCSP3CoreParser.h"
 
-#include "ast.hpp"
+#include "logic/ast.hpp"
 #include "shared_ptr.hpp"
 
 namespace XCSP3Core {
@@ -377,7 +377,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, int minVa
   }
 
   lala::LVar<Allocator> lvar(id.c_str());
-  variables.push_back(F::make_exists(UNTYPED, lvar, lala::Int));
+  variables.push_back(F::make_exists(UNTYPED, lvar, lala::CType<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::LEQ, F::make_z(maxValue)));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::GEQ, F::make_z(minValue)));
 }
@@ -439,7 +439,7 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
       throw std::runtime_error("found an undefined symbol (`OUNDEF`) which seems to indicate a bug in the XCSP3 model.");
     case ONEG: sig = NEG; break;
     case OABS: sig = ABS; break;
-    case OSQR: sig = SQR; break;
+    case OSQR: sig = POW; break;
     case OADD: sig = ADD; break;
     case OSUB: sig = SUB; break;
     case OMUL: sig = MUL; break;
@@ -447,16 +447,16 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
     case OMOD: sig = MOD; break;
     case OPOW: sig = POW; break;
     case ODIST: throw std::runtime_error("unsupported DIST"); // return make_dist(node);
-    case OMIN: sig = MEET; break;
-    case OMAX: sig = JOIN; break;
+    case OMIN: sig = MIN; break;
+    case OMAX: sig = MAX; break;
     case OLT: sig = lala::LT; break;
     case OLE: sig = LEQ; break;
     case OGE: sig = GEQ; break;
     case OGT: sig = lala::GT; break;
     case ONE: sig = NEQ; break;
     case OEQ: sig = lala::EQ; break;
-    case OSET:  throw std::runtime_error("unsupported set"); // return make_set(node);
-    case OIN: sig = GEQ; break;
+    case OSET: throw std::runtime_error("unsupported set"); // return make_set(node);
+    case OIN: sig = lala::IN; break;
     case ONOTIN: throw std::runtime_error("unsupported notin");  // return make_notin(node);
     case ONOT: sig = NOT; break;
     case OAND: sig = AND; break;
@@ -464,19 +464,19 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
     case OXOR: sig = XOR; break;
     case OIFF: sig = EQUIV; break;
     case OIMP: sig = IMPLY; break;
-    case OIF: throw std::runtime_error("unsupported if"); // return make_if(node);
+    case OIF: sig = ITE; break;
     case OCARD: sig = CARD; break;
-    case OUNION: sig = MEET; break;
-    case OINTER: sig = JOIN; break;
+    case OUNION: sig = UNION; break;
+    case OINTER: sig = INTERSECTION; break;
     case ODIFF:
     case OSDIFF:
     case OHULL:
     case ODJOINT:
       throw std::runtime_error("unsupported set operation");
-    case OSUBSET: sig = lala::GT; break;
-    case OSUBSEQ: sig = GEQ; break;
-    case OSUPSEQ: sig = LEQ; break;
-    case OSUPSET: sig = lala::LT; break;
+    case OSUBSET: sig = SUBSET; break;
+    case OSUBSEQ: sig = SUBSETEQ; break;
+    case OSUPSEQ: sig = SUPSETEQ; break;
+    case OSUPSET: sig = SUPSET; break;
     case OCONVEX:
     case OFDIV:
     case OFMOD:
@@ -506,6 +506,9 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
   for(int i = 0; i < node->parameters.size(); ++i) {
     seq.push_back(make_formula(node->parameters[i]));
   }
+  if(node->type == OSQR) {
+    seq.push_back(F::make_z(2)); // we represent `x SQR` by `x POW 2`.
+  }
   return F::make_nary(sig, std::move(seq));
 }
 
@@ -527,7 +530,7 @@ lala::Sig convert(OrderType op) {
     case GE: return lala::GEQ;
     case EQ: return lala::EQ;
     case NE: return lala::NEQ;
-    case IN: return lala::GEQ;
+    case IN: return lala::IN;
     default:
       throw std::runtime_error("convert: unsupported operator");
   }

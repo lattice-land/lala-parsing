@@ -153,7 +153,7 @@ namespace lala {
   battery::shared_ptr<SFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename) {
     std::ifstream t(filename);
     std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-    return parse_flatzinc_str(input);
+    return parse_flatzinc_str<Allocator>(input);
   }
 }
 

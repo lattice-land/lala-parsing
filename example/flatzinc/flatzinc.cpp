@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     printf("usage: %s <flatzinc-filename.fzn>\n", argv[0]);
     return 1;
   }
-  auto sf = parse_flatzinc<battery::StandardAllocator>(argv[1]);
-  sf->formula().print(true, true);
+  auto f = parse_flatzinc<battery::StandardAllocator>(argv[1]);
+  f->print(true, true);
   return 0;
 }

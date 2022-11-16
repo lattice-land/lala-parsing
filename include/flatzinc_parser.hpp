@@ -36,7 +36,7 @@ namespace lala {
   }
 
   template<class Allocator>
-  battery::shared_ptr<SFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
 
     using F = TFormula<Allocator>;
 
@@ -146,11 +146,11 @@ namespace lala {
 
     F f;
     parser.parse(input.c_str(), f);
-    return battery::make_shared<SFormula<Allocator>, Allocator>(std::move(f));
+    return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
   }
 
   template<class Allocator>
-  battery::shared_ptr<SFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename) {
     std::ifstream t(filename);
     std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
     return parse_flatzinc_str<Allocator>(input);

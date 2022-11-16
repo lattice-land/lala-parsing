@@ -27,7 +27,7 @@ namespace lala {
   }
 
   template<class Allocator>
-  battery::shared_ptr<SFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename) {
     XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb;
     parse_xcsp3(filename, cb);
     return cb.build_formula();
@@ -164,7 +164,6 @@ namespace XCSP3Core {
         bool debug = false;
 
         using F = lala::TFormula<Allocator>;
-        using SF = lala::SFormula<Allocator>;
 
       private:
         std::vector<F> variables;
@@ -184,7 +183,7 @@ namespace XCSP3Core {
           return constraints.size();
         }
 
-        battery::shared_ptr<SF, Allocator> build_formula() {
+        battery::shared_ptr<F, Allocator> build_formula() {
           typename F::Sequence seq;
           seq.reserve(variables.size() + constraints.size());
           for(int i = 0; i < variables.size(); ++i) {
@@ -194,18 +193,7 @@ namespace XCSP3Core {
             seq.push_back(std::move(constraints[i]));
           }
           auto f = F::make_nary(lala::AND, std::move(seq));
-          if(minimize.has_value() && maximize.has_value()) {
-            throw std::runtime_error("Multiple objectives are unsupported.");
-          }
-          if(minimize.has_value()) {
-            return battery::make_shared<SF, Allocator>(SF(std::move(f), lala::MINIMIZE, *minimize));
-          }
-          else if(maximize.has_value()) {
-            return battery::make_shared<SF, Allocator>(SF(std::move(f), lala::MAXIMIZE, *maximize));
-          }
-          else {
-            return battery::make_shared<SF, Allocator>(SF(std::move(f)));
-          }
+          return battery::make_shared<F, Allocator>(std::move(f));
         }
     };
 }
@@ -1468,7 +1456,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimizeVariable(XVariable 
   if(debug) {
     cout << "\n    objective: minimize variable " << x << endl;
   }
-  minimize = lala::LVar<Allocator>(x->id.c_str());
+  constraints.push_back(F::make_unary(lala::MINIMIZE, F::make_lvar(UNTYPED, x->id.c_str())));
 }
 
 
@@ -1477,7 +1465,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeVariable(XVariable 
   if(debug) {
     cout << "\n    objective: maximize variable " << x << endl;
   }
-  maximize = lala::LVar<Allocator>(x->id.c_str());
+  constraints.push_back(F::make_unary(lala::MAXIMIZE, F::make_lvar(UNTYPED, x->id.c_str())));
 }
 
 

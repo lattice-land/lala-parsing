@@ -58,10 +58,10 @@ namespace lala {
         VariableDecl <- 'var' Type ':' Identifier Annotations ';'
 
         IntType <- 'int'
-        FloatType <- 'float' / 'real'
+        RealType <- 'float' / 'real'
         BoolType <- 'bool'
         SetType <- 'set' 'of' Type
-        Type <- IntType / FloatType / BoolType / SetType
+        Type <- IntType / RealType / BoolType / SetType
 
         Annotations <- ('::' Identifier ('(' Literal ')')?)*
 
@@ -90,12 +90,12 @@ namespace lala {
       return CType<Allocator>(CType<Allocator>::Int);
     };
 
-    parser["FloatType"] = [](const peg::SemanticValues &vs) {
+    parser["RealType"] = [](const peg::SemanticValues &vs) {
       return CType<Allocator>(CType<Allocator>::Real);
     };
 
     parser["BoolType"] = [](const peg::SemanticValues &vs) {
-      return CType<Allocator>(CType<Allocator>::Int);
+      return CType<Allocator>(CType<Allocator>::Bool);
     };
 
     parser["SetType"] = [](const peg::SemanticValues &vs) {

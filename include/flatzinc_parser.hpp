@@ -35,6 +35,8 @@ namespace lala {
     }
   }
 
+  /** We parse the constraint language FlatZinc as described in the documentation: https://www.minizinc.org/doc-2.4.1/en/fzn-spec.html#specification-of-flatzinc.
+   * We also extend FlatZinc conservatively for the purposes of our framework. */
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
 
@@ -56,7 +58,7 @@ namespace lala {
         VariableDecl <- 'var' Type ':' Identifier Annotations ';'
 
         IntType <- 'int'
-        FloatType <- 'float'
+        FloatType <- 'float' / 'real'
         BoolType <- 'bool'
         SetType <- 'set' 'of' Type
         Type <- IntType / FloatType / BoolType / SetType

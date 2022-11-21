@@ -4,6 +4,7 @@ include(FetchContent)
 include(CMakePrintHelpers)
 
 project(lala-parsing LANGUAGES CXX)
+option(LALAPARSING_BUILD_EXAMPLES "LALAPARSING_BUILD_EXAMPLES" OFF)
 
 # Avoid warning about DOWNLOAD_EXTRACT_TIMESTAMP in CMake 3.24:
 # Fix found at https://github.com/ethereum/solidity/pull/13429
@@ -86,6 +87,9 @@ endif()
 
 # Example binary
 
+
+if(LALAPARSING_BUILD_EXAMPLES)
+
 add_executable(example_xcsp3 example/xcsp3/xcsp3.cpp)
 target_include_directories(example_xcsp3 PRIVATE ${LIBXML2_INCLUDE_DIR} ${lala_parsing_SOURCE_DIR}/include ${xcsp3parser_SOURCE_DIR}/include ${cuda_battery_SOURCE_DIR}/include ${lala_core_SOURCE_DIR}/include ${thrust_SOURCE_DIR})
 target_link_libraries(example_xcsp3 PRIVATE xcsp3parser ${LIBXML2_LIBRARIES} cuda_battery lala_core lala_parsing)
@@ -93,6 +97,8 @@ target_link_libraries(example_xcsp3 PRIVATE xcsp3parser ${LIBXML2_LIBRARIES} cud
 add_executable(example_flatzinc example/flatzinc/flatzinc.cpp)
 target_include_directories(example_flatzinc PRIVATE ${lala_parsing_SOURCE_DIR}/include ${cuda_battery_SOURCE_DIR}/include ${lala_core_SOURCE_DIR}/include ${cpp-peglib_SOURCE_DIR} ${thrust_SOURCE_DIR})
 target_link_libraries(example_flatzinc PRIVATE cuda_battery lala_core lala_parsing)
+
+endif()
 
 # Documentation
 

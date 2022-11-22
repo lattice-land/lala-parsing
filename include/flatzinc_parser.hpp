@@ -108,6 +108,7 @@ namespace lala {
       - Add the type alias `real` (same as `float`).
       - Add the predicates `int_ge`, `int_gt` mainly to simplify testing in lala_core.
       - Add the functions `int_minus`, `float_minus`, `int_neg`, `float_neg`.
+      - Add the ability to have `true` and `false` in the `constraint` statement.
   */
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
@@ -138,7 +139,7 @@ namespace lala {
 
         Annotations <- ('::' Identifier ('(' Literal ')')?)*
 
-        ConstraintDecl <- 'constraint' PredicateCall Annotations ';'
+        ConstraintDecl <- 'constraint' (PredicateCall / Boolean) Annotations ';'
 
         PredicateCall <- Identifier '(' Literal (',' Literal)* ')'
 
@@ -156,7 +157,7 @@ namespace lala {
     };
 
     parser["Boolean"] = [](const peg::SemanticValues &vs) {
-      return F::make_z(vs.token_to_string() == "true" ? 1 : 0);
+      return vs.token_to_string() == "true" ? F::make_true() : F::make_false();
     };
 
     parser["Identifier"] = [](const peg::SemanticValues &vs) {

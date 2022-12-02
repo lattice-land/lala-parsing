@@ -169,20 +169,20 @@ namespace lala {
     };
 
     parser["IntType"] = [](const peg::SemanticValues &vs) {
-      return CType<Allocator>(CType<Allocator>::Int);
+      return Sort<Allocator>(Sort<Allocator>::Int);
     };
 
     parser["RealType"] = [](const peg::SemanticValues &vs) {
-      return CType<Allocator>(CType<Allocator>::Real);
+      return Sort<Allocator>(Sort<Allocator>::Real);
     };
 
     parser["BoolType"] = [](const peg::SemanticValues &vs) {
-      return CType<Allocator>(CType<Allocator>::Bool);
+      return Sort<Allocator>(Sort<Allocator>::Bool);
     };
 
     parser["SetType"] = [](const peg::SemanticValues &vs) {
-      CType<Allocator> sub_ty = std::any_cast<CType<Allocator>>(vs[0]);
-      return CType<Allocator>(CType<Allocator>::Set, std::move(sub_ty));
+      Sort<Allocator> sub_ty = std::any_cast<Sort<Allocator>>(vs[0]);
+      return Sort<Allocator>(Sort<Allocator>::Set, std::move(sub_ty));
     };
 
     parser["Annotations"] = [](const peg::SemanticValues &vs) {
@@ -190,7 +190,7 @@ namespace lala {
     };
 
     parser["VariableDecl"] = [](const peg::SemanticValues &vs) {
-      auto ty = std::any_cast<CType<Allocator>>(vs[0]);
+      auto ty = std::any_cast<Sort<Allocator>>(vs[0]);
       auto f = F::make_exists(UNTYPED,
         std::any_cast<LVar<Allocator>>(vs[1]),
         ty,

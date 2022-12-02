@@ -365,7 +365,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, int minVa
   }
 
   lala::LVar<Allocator> lvar(id.c_str());
-  variables.push_back(F::make_exists(UNTYPED, lvar, lala::CType<Allocator>::Int));
+  variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::LEQ, F::make_z(maxValue)));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::GEQ, F::make_z(minValue)));
 }

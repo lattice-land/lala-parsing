@@ -157,13 +157,13 @@ namespace lala {
       else if(name == "int_lt_reif") { return make_binary_fun_eq<F>(silent, LT, vs, EQUIV); }
       else if(name == "int_ne_reif") { return make_binary_fun_eq<F>(silent, NEQ, vs, EQUIV); }
       else if(name == "bool2int") { return make_binary<F>(silent, EQ, vs); }
-      else if(name == "bool_and") { return make_binary_fun_eq<F>(silent, AND, vs, EQUIV); }
       else if(name == "bool_eq") { return make_binary<F>(silent, EQ, vs); }
       else if(name == "bool_le") { return make_binary<F>(silent, LEQ, vs); }
       else if(name == "bool_lt") { return make_binary<F>(silent, LT, vs); }
       else if(name == "bool_eq_reif") { return make_binary_fun_eq<F>(silent, EQ, vs, EQUIV); }
       else if(name == "bool_le_reif") { return make_binary_fun_eq<F>(silent, LEQ, vs, EQUIV); }
       else if(name == "bool_lt_reif") { return make_binary_fun_eq<F>(silent, LT, vs, EQUIV); }
+      else if(name == "bool_and") { return make_binary_fun_eq<F>(silent, AND, vs, EQUIV); }
       else if(name == "bool_not") { return make_binary<F>(silent, NOT, vs); }
       else if(name == "bool_or") { return make_binary_fun_eq<F>(silent, OR, vs, EQUIV); }
       else if(name == "bool_xor") {
@@ -250,6 +250,7 @@ namespace lala {
         else if(name == "int_times") { return make_binary_fun<F>(MUL, vs); }
         else if(name == "int_max") { return make_binary_fun<F>(MAX, vs); }
         else if(name == "int_min") { return make_binary_fun<F>(MIN, vs); }
+        else if(name == "bool_and") { return make_binary_fun<F>(AND, vs); }
         else if(name == "bool_not") { return make_unary_fun<F>(NOT, vs); }
         else if(name == "bool_or") { return make_binary_fun<F>(OR, vs); }
         else if(name == "bool_xor") { return make_binary_fun<F>(XOR, vs); }

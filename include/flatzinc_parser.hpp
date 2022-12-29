@@ -100,115 +100,10 @@ namespace lala {
     F make_log(int base, const peg::SemanticValues &vs) {
       return F::make_binary(std::any_cast<F>(vs[1]), LOG, F::make_z(base));
     }
-  }
 
-  /** We parse the constraint language FlatZinc as described in the documentation: https://www.minizinc.org/doc-2.4.1/en/fzn-spec.html#specification-of-flatzinc.
-   * We also extend FlatZinc conservatively for the purposes of our framework:
-
-      - Add the type alias `real` (same as `float`).
-      - Add the predicates `int_ge`, `int_gt` mainly to simplify testing in lala_core.
-      - Add the functions `int_minus`, `float_minus`, `int_neg`, `float_neg`.
-      - Add the ability to have `true` and `false` in the `constraint` statement.
-  */
-  template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
-
-    using F = TFormula<Allocator>;
-
-    peg::parser parser(R"(
-        Statements  <- (VariableDecl / ConstraintDecl)+
-
-        Literal     <- Boolean / Real / Integer / VariableLit
-
-        VariableLit <- Identifier
-        Identifier  <- < [a-zA-Z_][a-zA-Z0-9_]* >
-        Boolean     <- < 'true' / 'false' >
-        Real        <- < (
-             'inf'
-           / '-inf'
-           / [+-]? [0-9]+ (('.' [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
-        Integer     <- < [+-]? [0-9]+ >
-
-        VariableDecl <- 'var' Type ':' Identifier Annotations ';'
-
-        IntType <- 'int'
-        RealType <- 'float' / 'real'
-        BoolType <- 'bool'
-        SetType <- 'set' 'of' Type
-        Type <- IntType / RealType / BoolType / SetType
-
-        Annotations <- ('::' Identifier ('(' Literal ')')?)*
-
-        ConstraintDecl <- 'constraint' (PredicateCall / Boolean) Annotations ';'
-
-        PredicateCall <- Identifier '(' Literal (',' Literal)* ')'
-
-        %whitespace <- [ \n\r\t]*
-    )");
-
-    assert(static_cast<bool>(parser) == true);
-
-    parser["Integer"] = [](const peg::SemanticValues &vs) {
-      return F::make_z(vs.token_to_number<logic_int>());
-    };
-
-    parser["Real"] = [](const peg::SemanticValues &vs) {
-      return F::make_real(impl::string_to_real(vs.token_to_string()));
-    };
-
-    parser["Boolean"] = [](const peg::SemanticValues &vs) {
-      return vs.token_to_string() == "true" ? F::make_true() : F::make_false();
-    };
-
-    parser["Identifier"] = [](const peg::SemanticValues &vs) {
-      return LVar<Allocator>(vs.token_to_string().c_str());
-    };
-
-    parser["VariableLit"] = [](const peg::SemanticValues &vs) {
-      return F::make_lvar(UNTYPED, std::any_cast<LVar<Allocator>>(vs[0]));
-    };
-
-    parser["IntType"] = [](const peg::SemanticValues &vs) {
-      return Sort<Allocator>(Sort<Allocator>::Int);
-    };
-
-    parser["RealType"] = [](const peg::SemanticValues &vs) {
-      return Sort<Allocator>(Sort<Allocator>::Real);
-    };
-
-    parser["BoolType"] = [](const peg::SemanticValues &vs) {
-      return Sort<Allocator>(Sort<Allocator>::Bool);
-    };
-
-    parser["SetType"] = [](const peg::SemanticValues &vs) {
-      Sort<Allocator> sub_ty = std::any_cast<Sort<Allocator>>(vs[0]);
-      return Sort<Allocator>(Sort<Allocator>::Set, std::move(sub_ty));
-    };
-
-    parser["Annotations"] = [](const peg::SemanticValues &vs) {
-      return vs;
-    };
-
-    parser["VariableDecl"] = [](const peg::SemanticValues &vs) {
-      auto ty = std::any_cast<Sort<Allocator>>(vs[0]);
-      auto f = F::make_exists(UNTYPED,
-        std::any_cast<LVar<Allocator>>(vs[1]),
-        ty,
-        ty.default_approx());
-      auto annots = std::any_cast<peg::SemanticValues>(vs[2]);
-      impl::update_with_annotation(f, annots);
-      return f;
-    };
-
-    parser["ConstraintDecl"] = [](const peg::SemanticValues &vs) {
-      auto f = std::any_cast<F>(vs[0]);
-      auto annots = std::any_cast<peg::SemanticValues>(vs[1]);
-      impl::update_with_annotation(f, annots);
-      return f;
-    };
-
-    parser["PredicateCall"] = [](const peg::SemanticValues &vs) {
-      auto name = std::any_cast<LVar<Allocator>>(vs[0]);
+    template <class F>
+    F predicate_call(const peg::SemanticValues &vs) {
+      auto name = std::any_cast<LVar<typename F::allocator_type>>(vs[0]);
       using namespace impl;
       if(name == "int_le") { return make_binary<F>(LEQ, vs); }
       else if(name == "int_lt") { return make_binary<F>(LT, vs); }
@@ -301,10 +196,127 @@ namespace lala {
       else if(name == "float_pow") { return make_binary_fun_eq<F>(POW, vs); }
       else if(name == "float_sqrt") { return make_unary_fun_eq<F>(SQRT, vs); }
       else if(name == "int2float") { return make_binary<F>(EQ, vs); }
-      else {
-        std::cerr << "Predicate " << name.data() << " unsupported." << std::endl;
-      }
       return F();
+    }
+  }
+
+  /** We parse the constraint language FlatZinc as described in the documentation: https://www.minizinc.org/doc-2.4.1/en/fzn-spec.html#specification-of-flatzinc.
+   * We also extend FlatZinc conservatively for the purposes of our framework:
+
+      - Add the type alias `real` (same as `float`).
+      - Add the predicates `int_ge`, `int_gt` mainly to simplify testing in lala_core.
+      - Add the functions `int_minus`, `float_minus`, `int_neg`, `float_neg`.
+      - Add the ability to have `true` and `false` in the `constraint` statement.
+  */
+  template<class Allocator>
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
+
+    using F = TFormula<Allocator>;
+
+    peg::parser parser(R"(
+        Statements  <- (VariableDecl / ConstraintDecl)+ !.
+
+        Literal     <- Boolean / Real / Integer / VariableLit
+
+        VariableLit <- Identifier
+        Identifier  <- < [a-zA-Z_][a-zA-Z0-9_]* >
+        Boolean     <- < 'true' / 'false' >
+        Real        <- < (
+             'inf'
+           / '-inf'
+           / [+-]? [0-9]+ (('.' [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
+        Integer     <- < [+-]? [0-9]+ >
+
+        VariableDecl <- 'var' Type ':' Identifier Annotations ';'
+
+        IntType <- 'int'
+        RealType <- 'float' / 'real'
+        BoolType <- 'bool'
+        SetType <- 'set' 'of' Type
+        Type <- IntType / RealType / BoolType / SetType
+
+        Annotations <- ('::' Identifier ('(' Literal ')')?)*
+
+        ConstraintDecl <- 'constraint' (PredicateCall / Boolean) Annotations ';'
+
+        PredicateCall <- Identifier '(' Literal (',' Literal)* ')'
+
+        %whitespace <- [ \n\r\t]*
+    )");
+
+    assert(static_cast<bool>(parser) == true);
+
+    parser["Integer"] = [](const peg::SemanticValues &vs) {
+      return F::make_z(vs.token_to_number<logic_int>());
+    };
+
+    parser["Real"] = [](const peg::SemanticValues &vs) {
+      return F::make_real(impl::string_to_real(vs.token_to_string()));
+    };
+
+    parser["Boolean"] = [](const peg::SemanticValues &vs) {
+      return vs.token_to_string() == "true" ? F::make_true() : F::make_false();
+    };
+
+    parser["Identifier"] = [](const peg::SemanticValues &vs) {
+      return LVar<Allocator>(vs.token_to_string().c_str());
+    };
+
+    parser["VariableLit"] = [](const peg::SemanticValues &vs) {
+      return F::make_lvar(UNTYPED, std::any_cast<LVar<Allocator>>(vs[0]));
+    };
+
+    parser["IntType"] = [](const peg::SemanticValues &vs) {
+      return Sort<Allocator>(Sort<Allocator>::Int);
+    };
+
+    parser["RealType"] = [](const peg::SemanticValues &vs) {
+      return Sort<Allocator>(Sort<Allocator>::Real);
+    };
+
+    parser["BoolType"] = [](const peg::SemanticValues &vs) {
+      return Sort<Allocator>(Sort<Allocator>::Bool);
+    };
+
+    parser["SetType"] = [](const peg::SemanticValues &vs) {
+      Sort<Allocator> sub_ty = std::any_cast<Sort<Allocator>>(vs[0]);
+      return Sort<Allocator>(Sort<Allocator>::Set, std::move(sub_ty));
+    };
+
+    parser["Annotations"] = [](const peg::SemanticValues &vs) {
+      return vs;
+    };
+
+    parser["VariableDecl"] = [](const peg::SemanticValues &vs) {
+      auto ty = std::any_cast<Sort<Allocator>>(vs[0]);
+      auto f = F::make_exists(UNTYPED,
+        std::any_cast<LVar<Allocator>>(vs[1]),
+        ty,
+        ty.default_approx());
+      auto annots = std::any_cast<peg::SemanticValues>(vs[2]);
+      impl::update_with_annotation(f, annots);
+      return f;
+    };
+
+    parser["ConstraintDecl"] = [](const peg::SemanticValues &vs) {
+      auto f = std::any_cast<F>(vs[0]);
+      auto annots = std::any_cast<peg::SemanticValues>(vs[1]);
+      impl::update_with_annotation(f, annots);
+      return f;
+    };
+
+    parser["PredicateCall"] = [](const peg::SemanticValues &vs) {
+      return impl::predicate_call<F>(vs);
+    };
+
+    parser["PredicateCall"].predicate = [](const peg::SemanticValues &vs, const std::any&, std::string &msg)
+    {
+      if(impl::predicate_call<F>(vs).is_true()) {
+        auto name = std::any_cast<LVar<Allocator>>(vs[0]);
+        msg = "Predicate " + std::string(name.data()) + " unsupported.";
+        return false;
+      }
+      return true;
     };
 
     parser["Statements"] = [](const peg::SemanticValues &vs) {
@@ -319,9 +331,17 @@ namespace lala {
       }
     };
 
+    parser.set_logger([](size_t line, size_t col, const std::string& msg, const std::string &rule) {
+      std::cerr << line << ":" << col << ": " << msg << "\n";
+    });
+
     F f;
-    parser.parse(input.c_str(), f);
-    return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
+    if(parser.parse(input.c_str(), f)) {
+      return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
+    }
+    else {
+      return nullptr;
+    }
   }
 
   template<class Allocator>

@@ -11,6 +11,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   auto f = parse_flatzinc<battery::StandardAllocator>(argv[1]);
-  f->print(true, true);
+  if(!f) {
+    std::cerr << "Could not parse the FlatZinc input\n" << std::endl;
+  }
+  else {
+    f->print(true, true);
+  }
   return 0;
 }

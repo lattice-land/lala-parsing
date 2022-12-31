@@ -299,6 +299,7 @@ namespace lala {
       - Add the functions `int_minus`, `float_minus`, `int_neg`, `float_neg`.
       - Add the ability to have `true` and `false` in the `constraint` statement.
       - Parameters of predicates are not required to be flat, every constraint comes with a functional flavor, e.g., `int_le(int_plus(a,b), 5)` stands for `a+b <= 5`.
+      - Several solve items are allowed, which is useful for multi-objective optimization for instance.
   */
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
@@ -306,7 +307,7 @@ namespace lala {
     using F = TFormula<Allocator>;
 
     peg::parser parser(R"(
-        Statements  <- (VariableDecl / ConstraintDecl)+ !.
+        Statements  <- (VariableDecl / ConstraintDecl / SolveItem)+
 
         Literal     <- Boolean / Real / Integer / VariableLit
 
@@ -335,6 +336,11 @@ namespace lala {
         FunctionCall <-  Identifier '(' Parameter (',' Parameter )* ')'
         Parameter <- LiteralInExpression / FunctionCall
         PredicateCall <- Identifier '(' Parameter (',' Parameter)* ')'
+
+        MinimizeItem <- 'minimize' Literal
+        MaximizeItem <- 'maximize' Literal
+        SatisfyItem <- 'satisfy'
+        SolveItem <- 'solve' (MinimizeItem / MaximizeItem / SatisfyItem) ';'
 
         %whitespace <- [ \n\r\t]*
     )");
@@ -438,6 +444,20 @@ namespace lala {
         }
         return F::make_nary(AND, std::move(children));
       }
+    };
+
+    parser["MinimizeItem"] = [](const peg::SemanticValues &vs) {
+      auto literal = std::any_cast<F>(vs[0]);
+      return F::make_unary(MINIMIZE, std::move(literal));
+    };
+
+    parser["MaximizeItem"] = [](const peg::SemanticValues &vs) {
+      auto literal = std::any_cast<F>(vs[0]);
+      return F::make_unary(MAXIMIZE, std::move(literal));
+    };
+
+    parser["SatisfyItem"] = [](const peg::SemanticValues &vs) {
+      return F();
     };
 
     parser.set_logger([](size_t line, size_t col, const std::string& msg, const std::string &rule) {

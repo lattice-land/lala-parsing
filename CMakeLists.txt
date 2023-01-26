@@ -52,7 +52,7 @@ set(PEGLIB_BUILD_LINT OFF CACHE INTERNAL "")
 FetchContent_Declare(
   cpp-peglib
   GIT_REPOSITORY "https://github.com/ptal/cpp-peglib.git"
-  GIT_TAG        41132d17764fd7da2f4d4f5eabff3204016cd571
+  GIT_TAG        e9dbeeff8fa7500194c27d22ba1e7dffdd049bfb
 )
 FetchContent_MakeAvailable(cpp-peglib)
 

@@ -259,6 +259,7 @@ public:
         }
       } catch(std::bad_any_cast) {
         auto array = std::any_cast<SV>(sv[2]);
+        arrays[identifier] = array.size();
         for(int i = 0; i < array.size(); ++i) {
           auto id = make_array_access(identifier, i);
           params[id] = f(array[i]);
@@ -270,6 +271,7 @@ public:
     F make_variable_array_decl(const SV& sv) {
       int arraySize = f(sv[0]).z();
       auto name = std::any_cast<std::string>(sv[2]);
+      arrays[name] = arraySize;
       battery::vector<F, Allocator> decl;
       for(int i = 0; i < arraySize; ++i) {
         decl.push_back(make_variable_decl(sv, make_array_access(name, i), sv[1], sv[3]));
@@ -443,38 +445,12 @@ public:
       else if(name == "float_pow") { return make_binary_fun_eq(POW, sv); }
       else if(name == "float_sqrt") { return make_unary_fun_eq(SQRT, sv); }
       else if(name == "int2float") { return make_binary(EQ, sv); }
-      else if(name == "array_int_element" || name == "array_var_int_element") {
-        // if(sv.size() < 3) {
-        //   return make_error(error, "`" + name + "` expects three parameters.");
-        // }
-        // auto index = f(sv[0]);
-        // auto value = f(sv[2]);
-        // try {
-        //   auto arrayName = f(sv[1]);
-        //   if(arrayName.is(F::LV)) {
-        //     if(arrays.contains(arrayName)) {
-        //       int size = arrays[arrayName];
-        //       for(int i = 0; i < size; ++i) {
-        //         auto varName = make_array_access(arrayName, i);
-        //         if(params.contains(varName)) {
-        //           // index == (i+1) ==> param[varName] = value
-        //         }
-        //         else {
-        //           // index == (i+1) ==> varName = value
-        //         }
-        //       }
-        //     }
-        //   }
-        //   else {
-        //     return make_error(error, "`array_int_element` expects an array as the second parameter.");
-        //   }
-        // }
-        // catch(std::bad_any_cast) {
-        //   auto array = std::any_cast<SV>(sv[1]);
-        //   for(int i = 0; i < array.size(); ++i) {
-
-        //   }
-        // }
+      else if(name == "array_int_element" || name == "array_var_int_element"
+        || name == "array_bool_element" || name == "array_var_bool_element"
+        || name == "array_set_element" || name == "array_var_set_element"
+        || name == "array_float_element" || name == "array_var_float_element")
+      {
+        return make_element_constraint(name, sv);
       }
       return make_error(sv, "Unknown predicate `" + name + "`");
     }
@@ -584,6 +560,60 @@ public:
         }
         auto exists = make_existential(*(sort->sub), name, annots);
         return F::make_binary(std::move(exists), AND, std::move(inConstraint));
+      }
+    }
+
+    F make_element_constraint(const std::string& name, const SV& sv) {
+      if(sv.size() < 4) {
+        return make_error(sv, "`" + name + "` expects 3 parameters, but we got `" + std::to_string(sv.size()-1) + "` parameters");
+      }
+      auto index = f(sv[1]);
+      auto value = f(sv[3]);
+      // The array can either be a literal array directly, or the name of an array.
+      try {
+        auto arrayVar = f(sv[2]);
+        if(arrayVar.is(F::LV)) {
+          std::string arrayName(arrayVar.lv().data());
+          if(arrays.contains(arrayName)) {
+            int size = arrays[arrayName];
+            typename F::Sequence seq;
+            for(int i = 0; i < size; ++i) {
+              auto varName = make_array_access(arrayName, i);
+              // index = (i+1) ==> varName = value
+              auto index_eq = F::make_binary(index, EQ, F::make_z(i+1));
+              if(params.contains(varName)) {
+                seq.push_back(F::make_binary(
+                  index_eq,
+                  IMPLY,
+                  F::make_binary(params[varName], EQ, value)));
+              }
+              else {
+                seq.push_back(F::make_binary(
+                  index_eq,
+                  IMPLY,
+                  F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(varName.data())), EQ, value)));
+              }
+            }
+            return F::make_nary(AND, std::move(seq));
+          }
+          else {
+            return make_error(sv, "Unknown array parameter `" + arrayName + "`");
+          }
+        }
+        else {
+          return make_error(sv, "`" + name + "` expects an array as the second parameter.");
+        }
+      }
+      catch(std::bad_any_cast) {
+        auto array = std::any_cast<SV>(sv[2]);
+        typename F::Sequence seq;
+        for(int i = 0; i < array.size(); ++i) {
+          seq.push_back(F::make_binary(
+            F::make_binary(index, EQ, F::make_z(i+1)),
+            IMPLY,
+            F::make_binary(f(array[i]), EQ, value)));
+        }
+        return F::make_nary(AND, std::move(seq));
       }
     }
   };

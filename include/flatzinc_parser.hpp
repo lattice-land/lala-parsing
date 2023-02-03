@@ -34,262 +34,560 @@ namespace lala {
       return battery::make_tuple(lb, ub);
     }
 
-    template<class F>
-    void update_with_annotation(F& f, const peg::SemanticValues& annots) {
-      using Allocator = typename F::allocator_type;
+template <class Allocator>
+class FlatZincParser {
+  using allocator_type = Allocator;
+  using F = TFormula<allocator_type>;
+  using SV = peg::SemanticValues;
+  using Set = logic_set<F, allocator_type>;
+  using So = Sort<allocator_type>;
+
+  std::map<std::string, F> params; // Name and value of the parameters occuring in the model.
+  std::map<std::string, int> arrays; // Size of all named arrays (parameters and variables).
+  bool error;
+  bool silent;
+
+public:
+  FlatZincParser(): error(false), silent(false) {}
+
+  battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
+    peg::parser parser(R"(
+      Statements  <- (VariableDecl / VarArrayDecl / ParameterDecl / ConstraintDecl / SolveItem / Comment)+
+
+      Literal      <- Boolean / Real / Integer / ArrayAccess / VariableLit / Set
+      RangeLiteral <- SetRange / Literal
+      InnerRangeLiteral <- InnerSetRange / Literal
+
+      VariableLit <- Identifier
+      Identifier  <- < [a-zA-Z_][a-zA-Z0-9_]* >
+      Boolean     <- < 'true' / 'false' >
+      Real        <- < (
+           'inf'
+         / '-inf'
+         / [+-]? [0-9]+ (('.' (&'..' / !'.') [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
+      Integer     <- < [+-]? [0-9]+ >
+      Set         <- '{' '}' / '{' InnerRangeLiteral (',' InnerRangeLiteral)* '}'
+      InnerSetRange    <- Literal '..' Literal
+      SetRange <- InnerSetRange
+      ArrayAccess <- Identifier '[' (VariableLit / Integer) ']'
+
+      VariableDecl <- 'var' ValueType ':' Identifier Annotations ';'
+      VarArrayDecl <- 'array' '[' IndexSet ']' 'of' 'var' ValueType ':' Identifier Annotations ';'
+
+      SetValue <- 'set' 'of' (SetRange / Set)
+
+      ValueType <- Type
+                / SetValue
+                / SetRange
+                / Set
+
+      IntType <- 'int'
+      RealType <- 'float' / 'real'
+      BoolType <- 'bool'
+      SetType <- 'set' 'of' Type
+      Type <- IntType / RealType / BoolType / SetType
+
+      Annotations <- ('::' Identifier ('(' RangeLiteral ')')?)*
+
+      ConstraintDecl <- 'constraint' (PredicateCall / Boolean) Annotations ';'
+
+      LiteralInExpression <- RangeLiteral !'('
+      FunctionCall <-  Identifier '(' Parameter (',' Parameter )* ')'
+      Parameter <- LiteralInExpression / FunctionCall / LiteralArray
+      PredicateCall <- Identifier '(' Parameter (',' Parameter)* ')'
+
+      MinimizeItem <- 'minimize' RangeLiteral
+      MaximizeItem <- 'maximize' RangeLiteral
+      SatisfyItem <- 'satisfy'
+      SolveItem <- 'solve' (MinimizeItem / MaximizeItem / SatisfyItem) ';'
+
+      LiteralArray <- '[' RangeLiteral (',' RangeLiteral)* ']'
+      ParameterExpr <- RangeLiteral / LiteralArray
+      IndexSet <- '1' '..' Integer
+      ArrayType <- 'array' '[' IndexSet ']' 'of' Type
+      ParameterType <- Type / ArrayType
+      ParameterDecl <- ParameterType ':' Identifier '=' ParameterExpr ';'
+
+      ~Comment    <- '%' [^\n\r]* [ \n\r\t]*
+      %whitespace <- [ \n\r\t]*
+    )");
+
+    assert(static_cast<bool>(parser) == true);
+
+    parser["Integer"] = [](const SV &sv) { return F::make_z(sv.token_to_number<logic_int>()); };
+    parser["Real"] = [](const SV &sv) { return F::make_real(string_to_real(sv.token_to_string())); };
+    parser["Boolean"] = [](const SV &sv) { return sv.token_to_string() == "true" ? F::make_true() : F::make_false(); };
+    parser["Identifier"] = [](const SV &sv) { return sv.token_to_string(); };
+    parser["Set"] = [this](const SV &sv) { return make_set_literal(sv); };
+    parser["InnerSetRange"] = [this](const SV &sv) { return battery::make_tuple(f(sv[0]), f(sv[1])); };
+    parser["SetRange"] = [this](const SV &sv) { return F::make_set(Set({itv(sv[0])})); };
+    parser["ArrayAccess"] = [this](const SV &sv) { return make_access_literal(sv); };
+    parser["LiteralArray"] = [](const SV &sv) { return sv; };
+    parser["ParameterDecl"] = [this] (const SV &sv) { return make_parameter_decl(sv); };
+    parser["VariableLit"] = [](const SV &sv) { return F::make_lvar(UNTYPED, LVar<Allocator>(std::any_cast<std::string>(sv[0]))); };
+    parser["IntType"] = [](const SV &sv) { return So(So::Int); };
+    parser["RealType"] = [](const SV &sv) { return So(So::Real); };
+    parser["BoolType"] = [](const SV &sv) { return So(So::Bool); };
+    parser["SetType"] = [](const SV &sv) { return So(So::Set, std::any_cast<Sort<Allocator>>(sv[0])); };
+    parser["Annotations"] = [](const SV &sv) { return sv; };
+    // When we have `var set of 1..5: s;`, what it means is that `s in {}..{1..5}`, i.e., a set between {} and {1..5}.
+    parser["SetValue"] = [](const SV &sv) { return F::make_set(Set({battery::make_tuple(F::make_set(Set{}), f(sv[0]))})); };
+    parser["VariableDecl"] = [this](const SV &sv) { return make_variable_decl(sv, std::any_cast<std::string>(sv[1]), sv[0], sv[2]); };
+    parser["VarArrayDecl"] = [this](const SV &sv) { return make_variable_array_decl(sv); };
+    parser["ConstraintDecl"] = [this](const SV &sv) { return update_with_annotation(f(sv[0]), std::any_cast<SV>(sv[1])); };
+    parser["FunctionCall"] = [this](const SV &sv) { return function_call(sv); };
+    parser["LiteralArray"] = [](const SV &sv) { return sv; };
+    parser["PredicateCall"] = [this](const SV &sv) { return predicate_call(sv); };
+    parser["Statements"] = [this](const SV &sv) { return make_statements(sv); };
+    parser["MinimizeItem"] = [](const SV &sv) { return F::make_unary(MINIMIZE, f(sv[0])); };
+    parser["MaximizeItem"] = [](const SV &sv) { return F::make_unary(MAXIMIZE, f(sv[0])); };
+    parser["SatisfyItem"] = [](const SV &sv) { return F(); };
+    parser.set_logger([](size_t line, size_t col, const std::string& msg, const std::string &rule) {
+      std::cerr << line << ":" << col << ": " << msg << "\n";
+    });
+
+    F f;
+    if(parser.parse(input.c_str(), f) && !error) {
+      for(const auto& paramValue : params) {
+        std::cout << paramValue.first << " = ";
+        paramValue.second.print(false);
+        std::cout << std::endl;
+      }
+      return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
+    }
+    else {
+      return nullptr;
+    }
+  }
+
+  private:
+    static F f(const std::any& any) {
+      return std::any_cast<F>(any);
+    }
+
+    static battery::tuple<F, F> itv(const std::any& any) {
+      return std::any_cast<battery::tuple<F, F>>(any);
+    }
+
+    F make_error(const SV& sv, const std::string& msg) {
+      if(!silent) {
+        std::cerr << sv.line_info().first << ":" << sv.line_info().second << ":" << msg << std::endl;
+      }
+      error = true;
+      return F::make_false();
+    }
+
+    F make_arity_error(const SV& sv, Sig sig, int expected, int obtained) {
+      return make_error(sv, "The symbol `" + std::string(string_of_sig(sig)) +
+        "` expects `" + std::to_string(expected) + " parameters" +
+        ", but we got `" + std::to_string(obtained) + "` parameters.");
+    }
+
+    F make_set_literal(const SV& sv) {
+      logic_set<F, allocator_type> set;
+      for(int i = 0; i < sv.size(); ++i) {
+        try {
+          auto range = std::any_cast<battery::tuple<F,F>>(sv[i]);
+          set.push_back(range);
+        }
+        catch(std::bad_any_cast) {
+          bool element_added = false;
+          auto element = f(sv[i]);
+          if(element.is(F::Z) && set.size() > 0) {
+            auto& ub = battery::get<1>(set.back());
+            if(!ub.is(F::Z)) {
+              return make_error(sv, "Elements in a set are expected to be all of the same type.");
+            }
+            else if(ub.z() == element.z() - 1) {
+              ub.z() = element.z();
+              element_added = true;
+            }
+          }
+          else if(element.is(F::LV)) {
+            std::string name(element.lv().data());
+            if(params.contains(name)) {
+              set.push_back(std::make_tuple(params[name], params[name]));
+              element_added = true;
+            }
+            else {
+              return make_error(sv, "Undeclared parameter `" + name + "`.");
+            }
+          }
+          if(!element_added) {
+            set.push_back(std::make_tuple(element, element));
+          }
+        }
+      }
+      return F::make_set(set);
+    }
+
+    F make_access_literal(const SV& sv) {
+      auto name = std::any_cast<std::string>(sv[0]);
+      auto index = f(sv[1]);
+      int idx = -1;
+      if(index.is(F::Z)) {
+        idx = index.z();
+      }
+      else if(index.is(F::LV)) {
+        if(params.contains(index.lv().data())) {
+          auto pindex = params[index.lv().data()];
+          if(pindex.is(F::Z)) {
+            idx = pindex.z();
+          }
+        }
+      }
+      if(idx == -1) {
+        return make_error(sv, "Given `a[b]`, `b` must be an integer or an integer parameter.");
+      }
+      auto access_var = make_array_access(name, idx-1);
+      if(params.contains(access_var)) {
+        return params[access_var];
+      }
+      else {
+        return F::make_lvar(UNTYPED, access_var);
+      }
+    }
+
+    F make_parameter_decl(const SV& sv) {
+      std::string identifier(std::any_cast<std::string>(sv[1]));
+      try {
+        if(params.contains(identifier)) {
+          return make_error(sv, ("Parameter `" + identifier + "` already declared.").c_str());
+        }
+        else {
+          params[identifier] = f(sv[2]);
+        }
+      } catch(std::bad_any_cast) {
+        auto array = std::any_cast<SV>(sv[2]);
+        for(int i = 0; i < array.size(); ++i) {
+          auto id = make_array_access(identifier, i);
+          params[id] = f(array[i]);
+        }
+      }
+      return F::make_true();
+    }
+
+    F make_variable_array_decl(const SV& sv) {
+      int arraySize = f(sv[0]).z();
+      auto name = std::any_cast<std::string>(sv[2]);
+      battery::vector<F, Allocator> decl;
+      for(int i = 0; i < arraySize; ++i) {
+        decl.push_back(make_variable_decl(sv, make_array_access(name, i), sv[1], sv[3]));
+      }
+      return F::make_nary(AND, std::move(decl));
+    }
+
+    F update_with_annotation(F formula, const SV& annots) {
       for(int i = 0; i < annots.size(); ++i) {
-        auto name = std::any_cast<LVar<Allocator>>(annots[i]);
+        auto name = std::any_cast<std::string>(annots[i]);
         if(name == "abstract") {
           ++i;
-          AType ty = std::any_cast<F>(annots[i]).z();
-          f.type_as(ty);
+          AType ty = f(annots[i]).z();
+          formula.type_as(ty);
         }
-        else if(name == "under") { f.approx_as(UNDER); }
-        else if(name == "exact") { f.approx_as(EXACT); }
-        else if(name == "over") { f.approx_as(OVER); }
+        else if(name == "under") { formula.approx_as(UNDER); }
+        else if(name == "exact") { formula.approx_as(EXACT); }
+        else if(name == "over") { formula.approx_as(OVER); }
         else if(name == "is_defined_var") {}
         else if(name == "var_is_introduced") {}
         else if(name == "output_var") {}
         else {
-          std::cerr << "Annotation " << name.data() << " is unknown." << std::endl;
+          return make_error(annots, "Annotation " + name + " is unknown.");
         }
       }
+      return formula;
     }
 
-    template<class F>
-    F make_binary(bool silent, Sig sig, const peg::SemanticValues &vs) {
-      if(vs.size() != 3) {
-        if(!silent) {
-          std::cerr << "The symbol `" << string_of_sig(sig) << "` must be of binary arity, but "
-            << (vs.size()-1) << " parameters were passed." << std::endl;
-        }
-        return F();
+    F make_binary(Sig sig, const SV &sv) {
+      if(sv.size() != 3) {
+        return make_arity_error(sv, sig, 2, sv.size() - 1);
       }
-      return F::make_binary(std::any_cast<F>(vs[1]), sig, std::any_cast<F>(vs[2]));
+      return F::make_binary(f(sv[1]), sig, f(sv[2]));
     }
 
-    template<class F>
-    F make_unary_fun_eq(bool silent, Sig sig, const peg::SemanticValues &vs, Sig eq_kind = EQ) {
-      if(vs.size() != 3) {
-        if(!silent) {
-          std::cerr << "The symbol `" << string_of_sig(sig) << "` must be of unary arity, but "
-            << (vs.size()-2) << " parameters were passed." << std::endl;
-        }
-        return F();
+    F make_unary_fun_eq(Sig sig, const SV &sv, Sig eq_kind = EQ) {
+      if(sv.size() != 3) {
+        return make_arity_error(sv, sig, 1, sv.size() - 2);
       }
-      auto fun = F::make_unary(sig, std::any_cast<F>(vs[1]));
-      return F::make_binary(fun, eq_kind, std::any_cast<F>(vs[2]));
+      auto fun = F::make_unary(sig, f(sv[1]));
+      return F::make_binary(fun, eq_kind, f(sv[2]));
     }
 
-    template<class F>
-    F make_unary_fun(Sig sig, const peg::SemanticValues &vs) {
-      if(vs.size() != 2) {
-        std::cerr << "The symbol `" << string_of_sig(sig) << "` must be of unary arity, but "
-          << (vs.size()-1) << " parameters were passed." << std::endl;
-        return F();
+    F make_unary_fun(Sig sig, const SV &sv) {
+      if(sv.size() != 2) {
+        return make_arity_error(sv, sig, 1, sv.size() - 1);
       }
-      return F::make_unary(sig, std::any_cast<F>(vs[1]));
+      return F::make_unary(sig, f(sv[1]));
     }
 
-    template<class F>
-    F make_binary_fun_eq(bool silent, Sig sig, const peg::SemanticValues &vs, Sig eq_kind = EQ) {
-      if(vs.size() != 4) {
-        if(!silent) {
-          std::cerr << "The symbol `" << string_of_sig(sig) << "` must be of binary arity, but "
-            << (vs.size()-2) << " parameters were passed." << std::endl;
-        }
-        return F();
+    F make_binary_fun_eq(Sig sig, const SV &sv, Sig eq_kind = EQ) {
+      if(sv.size() != 4) {
+        return make_arity_error(sv, sig, 2, sv.size() - 2);
       }
-      auto fun = F::make_binary(std::any_cast<F>(vs[1]), sig, std::any_cast<F>(vs[2]));
-      return F::make_binary(fun, eq_kind, std::any_cast<F>(vs[3]));
+      auto fun = F::make_binary(f(sv[1]), sig, f(sv[2]));
+      return F::make_binary(fun, eq_kind, f(sv[3]));
     }
 
-    template<class F>
-    F make_binary_fun(Sig sig, const peg::SemanticValues &vs) {
-      if(vs.size() != 3) {
-        std::cerr << "The symbol `" << string_of_sig(sig) << "` must be of binary arity, but "
-          << (vs.size()-1) << " parameters were passed." << std::endl;
-        return F();
+    F make_binary_fun(Sig sig, const SV &sv) {
+      if(sv.size() != 3) {
+        return make_arity_error(sv, sig, 2, sv.size() - 1);
       }
-      return F::make_binary(std::any_cast<F>(vs[1]), sig, std::any_cast<F>(vs[2]));
+      return F::make_binary(f(sv[1]), sig, f(sv[2]));
     }
 
-    template <class F>
-    F make_float_in(const peg::SemanticValues &vs) {
+    F make_float_in(const SV &sv) {
       return F::make_binary(
-          F::make_binary(std::any_cast<F>(vs[1]), GEQ, std::any_cast<F>(vs[2])),
+          F::make_binary(f(sv[1]), GEQ, f(sv[2])),
           AND,
-          F::make_binary(std::any_cast<F>(vs[1]), LEQ, std::any_cast<F>(vs[3])));
+          F::make_binary(f(sv[1]), LEQ, f(sv[3])));
     }
 
-    template <class F>
-    F make_log(int base, const peg::SemanticValues &vs) {
-      return F::make_binary(std::any_cast<F>(vs[1]), LOG, F::make_z(base));
+    F make_log(int base, const SV &sv) {
+      return F::make_binary(f(sv[1]), LOG, F::make_z(base));
     }
 
-    template <class F>
-    F make_log_eq(int base, const peg::SemanticValues &vs) {
-      return F::make_binary(make_log<F>(base, vs), EQ, std::any_cast<F>(vs[2]));
+    F make_log_eq(int base, const SV &sv) {
+      return F::make_binary(make_log(base, sv), EQ, f(sv[2]));
     }
 
-    template <class F>
-    F predicate_call(const peg::SemanticValues &vs, bool silent=false) {
-      auto name = std::any_cast<LVar<typename F::allocator_type>>(vs[0]);
-      using namespace impl;
-      if(name == "int_le") { return make_binary<F>(silent, LEQ, vs); }
-      else if(name == "int_lt") { return make_binary<F>(silent, LT, vs); }
-      else if(name == "int_ge") { return make_binary<F>(silent, GEQ, vs); }
-      else if(name == "int_gt") { return make_binary<F>(silent, GT, vs); }
-      else if(name == "int_eq") { return make_binary<F>(silent, EQ, vs); }
-      else if(name == "int_ne") { return make_binary<F>(silent, NEQ, vs); }
-      else if(name == "int_abs") { return make_unary_fun_eq<F>(silent, ABS, vs); }
-      else if(name == "int_neg") { return make_unary_fun_eq<F>(silent, NEG, vs); }
-      else if(name == "int_div") { return make_binary_fun_eq<F>(silent, EDIV, vs); }
-      else if(name == "int_mod") { return make_binary_fun_eq<F>(silent, EMOD, vs); }
-      else if(name == "int_plus") { return make_binary_fun_eq<F>(silent, ADD, vs); }
-      else if(name == "int_minus") { return make_binary_fun_eq<F>(silent, SUB, vs); }
-      else if(name == "int_pow") { return make_binary_fun_eq<F>(silent, POW, vs); }
-      else if(name == "int_times") { return make_binary_fun_eq<F>(silent, MUL, vs); }
-      else if(name == "int_max") { return make_binary_fun_eq<F>(silent, MAX, vs); }
-      else if(name == "int_min") { return make_binary_fun_eq<F>(silent, MIN, vs); }
-      else if(name == "int_eq_reif") { return make_binary_fun_eq<F>(silent, EQ, vs, EQUIV); }
-      else if(name == "int_le_reif") { return make_binary_fun_eq<F>(silent, LEQ, vs, EQUIV); }
-      else if(name == "int_lt_reif") { return make_binary_fun_eq<F>(silent, LT, vs, EQUIV); }
-      else if(name == "int_ne_reif") { return make_binary_fun_eq<F>(silent, NEQ, vs, EQUIV); }
-      else if(name == "bool2int") { return make_binary<F>(silent, EQ, vs); }
-      else if(name == "bool_eq") { return make_binary<F>(silent, EQ, vs); }
-      else if(name == "bool_le") { return make_binary<F>(silent, LEQ, vs); }
-      else if(name == "bool_lt") { return make_binary<F>(silent, LT, vs); }
-      else if(name == "bool_eq_reif") { return make_binary_fun_eq<F>(silent, EQ, vs, EQUIV); }
-      else if(name == "bool_le_reif") { return make_binary_fun_eq<F>(silent, LEQ, vs, EQUIV); }
-      else if(name == "bool_lt_reif") { return make_binary_fun_eq<F>(silent, LT, vs, EQUIV); }
-      else if(name == "bool_and") { return make_binary_fun_eq<F>(silent, AND, vs, EQUIV); }
-      else if(name == "bool_not") { return make_binary<F>(silent, NOT, vs); }
-      else if(name == "bool_or") { return make_binary_fun_eq<F>(silent, OR, vs, EQUIV); }
+    F predicate_call(const SV &sv) {
+      auto name = std::any_cast<std::string>(sv[0]);
+      if(name == "int_le") { return make_binary(LEQ, sv); }
+      else if(name == "int_lt") { return make_binary(LT, sv); }
+      else if(name == "int_ge") { return make_binary(GEQ, sv); }
+      else if(name == "int_gt") { return make_binary(GT, sv); }
+      else if(name == "int_eq") { return make_binary(EQ, sv); }
+      else if(name == "int_ne") { return make_binary(NEQ, sv); }
+      else if(name == "int_abs") { return make_unary_fun_eq(ABS, sv); }
+      else if(name == "int_neg") { return make_unary_fun_eq(NEG, sv); }
+      else if(name == "int_div") { return make_binary_fun_eq(EDIV, sv); }
+      else if(name == "int_mod") { return make_binary_fun_eq(EMOD, sv); }
+      else if(name == "int_plus") { return make_binary_fun_eq(ADD, sv); }
+      else if(name == "int_minus") { return make_binary_fun_eq(SUB, sv); }
+      else if(name == "int_pow") { return make_binary_fun_eq(POW, sv); }
+      else if(name == "int_times") { return make_binary_fun_eq(MUL, sv); }
+      else if(name == "int_max") { return make_binary_fun_eq(MAX, sv); }
+      else if(name == "int_min") { return make_binary_fun_eq(MIN, sv); }
+      else if(name == "int_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
+      else if(name == "int_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
+      else if(name == "int_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
+      else if(name == "int_ne_reif") { return make_binary_fun_eq(NEQ, sv, EQUIV); }
+      else if(name == "bool2int") { return make_binary(EQ, sv); }
+      else if(name == "bool_eq") { return make_binary(EQ, sv); }
+      else if(name == "bool_le") { return make_binary(LEQ, sv); }
+      else if(name == "bool_lt") { return make_binary(LT, sv); }
+      else if(name == "bool_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
+      else if(name == "bool_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
+      else if(name == "bool_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
+      else if(name == "bool_and") { return make_binary_fun_eq(AND, sv, EQUIV); }
+      else if(name == "bool_not") { return make_binary(NOT, sv); }
+      else if(name == "bool_or") { return make_binary_fun_eq(OR, sv, EQUIV); }
       else if(name == "bool_xor") {
-        if(vs.size() == 3) { return make_binary<F>(silent, XOR, vs); }
-        else { return make_binary_fun_eq<F>(silent, XOR, vs, EQUIV); }
+        if(sv.size() == 3) { return make_binary(XOR, sv); }
+        else { return make_binary_fun_eq(XOR, sv, EQUIV); }
       }
-      else if(name == "set_card") { return make_unary_fun_eq<F>(silent, CARD, vs); }
-      else if(name == "set_diff") { return make_binary_fun_eq<F>(silent, DIFFERENCE, vs); }
-      else if(name == "set_eq") { return make_binary<F>(silent, EQ, vs); }
-      else if(name == "set_eq_reif") { return make_binary_fun_eq<F>(silent, EQ, vs, EQUIV); }
-      else if(name == "set_in") { return make_binary<F>(silent, IN, vs); }
-      else if(name == "set_in_reif") { return make_binary_fun_eq<F>(silent, IN, vs, EQUIV); }
-      else if(name == "set_intersect") { return make_binary_fun_eq<F>(silent, INTERSECTION, vs, EQUIV); }
-      else if(name == "set_union") { return make_binary_fun_eq<F>(silent, UNION, vs, EQUIV); }
-      else if(name == "set_ne") { return make_binary<F>(silent, NEQ, vs); }
-      else if(name == "set_ne_reif") { return make_binary_fun_eq<F>(silent, NEQ, vs, EQUIV); }
-      else if(name == "set_subset") { return make_binary<F>(silent, SUBSETEQ, vs); }
-      else if(name == "set_subset_reif") { return make_binary_fun_eq<F>(silent, SUBSETEQ, vs, EQUIV); }
-      else if(name == "set_superset") { return make_binary<F>(silent, SUPSETEQ, vs); }
-      else if(name == "set_symdiff") { return make_binary_fun_eq<F>(silent, SYMMETRIC_DIFFERENCE, vs, EQUIV); }
-      else if(name == "set_le") { return make_binary<F>(silent, LEQ, vs); }
-      else if(name == "set_le_reif") { return make_binary_fun_eq<F>(silent, LEQ, vs, EQUIV); }
-      else if(name == "set_lt") { return make_binary<F>(silent, LT, vs); }
-      else if(name == "set_lt_reif") { return make_binary_fun_eq<F>(silent, LT, vs, EQUIV); }
-      else if(name == "float_abs") { return make_binary_fun_eq<F>(silent, ABS, vs); }
-      else if(name == "float_neg") { return make_binary_fun_eq<F>(silent, NEG, vs); }
-      else if(name == "float_plus") { return make_binary_fun_eq<F>(silent, ADD, vs); }
-      else if(name == "float_minus") { return make_binary_fun_eq<F>(silent, SUB, vs); }
-      else if(name == "float_times") { return make_binary_fun_eq<F>(silent, MUL, vs); }
-      else if(name == "float_acos") { return make_unary_fun_eq<F>(silent, ACOS, vs); }
-      else if(name == "float_acosh") { return make_unary_fun_eq<F>(silent, ACOSH, vs); }
-      else if(name == "float_asin") { return make_unary_fun_eq<F>(silent, ASIN, vs); }
-      else if(name == "float_asinh") { return make_unary_fun_eq<F>(silent, ASINH, vs); }
-      else if(name == "float_atan") { return make_unary_fun_eq<F>(silent, ATAN, vs); }
-      else if(name == "float_atanh") { return make_unary_fun_eq<F>(silent, ATANH, vs); }
-      else if(name == "float_cos") { return make_unary_fun_eq<F>(silent, COS, vs); }
-      else if(name == "float_cosh") { return make_unary_fun_eq<F>(silent, COSH, vs); }
-      else if(name == "float_sin") { return make_unary_fun_eq<F>(silent, SIN, vs); }
-      else if(name == "float_sinh") { return make_unary_fun_eq<F>(silent, SINH, vs); }
-      else if(name == "float_tan") { return make_unary_fun_eq<F>(silent, TAN, vs); }
-      else if(name == "float_tanh") { return make_unary_fun_eq<F>(silent, TANH, vs); }
-      else if(name == "float_div") { return make_binary<F>(silent, DIV, vs); }
-      else if(name == "float_eq") { return make_binary<F>(silent, EQ, vs); }
-      else if(name == "float_eq_reif") { return make_binary_fun_eq<F>(silent, EQ, vs, EQUIV); }
-      else if(name == "float_le") { return make_binary<F>(silent, LEQ, vs); }
-      else if(name == "float_le_reif") { return make_binary_fun_eq<F>(silent, LEQ, vs, EQUIV); }
-      else if(name == "float_ne") { return make_binary<F>(silent, NEQ, vs); }
-      else if(name == "float_ne_reif") { return make_binary_fun_eq<F>(silent, NEQ, vs, EQUIV); }
-      else if(name == "float_lt") { return make_binary<F>(silent, LT, vs); }
-      else if(name == "float_lt_reif") { return make_binary_fun_eq<F>(silent, LT, vs, EQUIV); }
-      else if(name == "float_in") { return make_float_in<F>(vs); }
+      else if(name == "set_card") { return make_unary_fun_eq(CARD, sv); }
+      else if(name == "set_diff") { return make_binary_fun_eq(DIFFERENCE, sv); }
+      else if(name == "set_eq") { return make_binary(EQ, sv); }
+      else if(name == "set_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
+      else if(name == "set_in") { return make_binary(IN, sv); }
+      else if(name == "set_in_reif") { return make_binary_fun_eq(IN, sv, EQUIV); }
+      else if(name == "set_intersect") { return make_binary_fun_eq(INTERSECTION, sv, EQUIV); }
+      else if(name == "set_union") { return make_binary_fun_eq(UNION, sv, EQUIV); }
+      else if(name == "set_ne") { return make_binary(NEQ, sv); }
+      else if(name == "set_ne_reif") { return make_binary_fun_eq(NEQ, sv, EQUIV); }
+      else if(name == "set_subset") { return make_binary(SUBSETEQ, sv); }
+      else if(name == "set_subset_reif") { return make_binary_fun_eq(SUBSETEQ, sv, EQUIV); }
+      else if(name == "set_superset") { return make_binary(SUPSETEQ, sv); }
+      else if(name == "set_symdiff") { return make_binary_fun_eq(SYMMETRIC_DIFFERENCE, sv, EQUIV); }
+      else if(name == "set_le") { return make_binary(LEQ, sv); }
+      else if(name == "set_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
+      else if(name == "set_lt") { return make_binary(LT, sv); }
+      else if(name == "set_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
+      else if(name == "float_abs") { return make_binary_fun_eq(ABS, sv); }
+      else if(name == "float_neg") { return make_binary_fun_eq(NEG, sv); }
+      else if(name == "float_plus") { return make_binary_fun_eq(ADD, sv); }
+      else if(name == "float_minus") { return make_binary_fun_eq(SUB, sv); }
+      else if(name == "float_times") { return make_binary_fun_eq(MUL, sv); }
+      else if(name == "float_acos") { return make_unary_fun_eq(ACOS, sv); }
+      else if(name == "float_acosh") { return make_unary_fun_eq(ACOSH, sv); }
+      else if(name == "float_asin") { return make_unary_fun_eq(ASIN, sv); }
+      else if(name == "float_asinh") { return make_unary_fun_eq(ASINH, sv); }
+      else if(name == "float_atan") { return make_unary_fun_eq(ATAN, sv); }
+      else if(name == "float_atanh") { return make_unary_fun_eq(ATANH, sv); }
+      else if(name == "float_cos") { return make_unary_fun_eq(COS, sv); }
+      else if(name == "float_cosh") { return make_unary_fun_eq(COSH, sv); }
+      else if(name == "float_sin") { return make_unary_fun_eq(SIN, sv); }
+      else if(name == "float_sinh") { return make_unary_fun_eq(SINH, sv); }
+      else if(name == "float_tan") { return make_unary_fun_eq(TAN, sv); }
+      else if(name == "float_tanh") { return make_unary_fun_eq(TANH, sv); }
+      else if(name == "float_div") { return make_binary(DIV, sv); }
+      else if(name == "float_eq") { return make_binary(EQ, sv); }
+      else if(name == "float_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
+      else if(name == "float_le") { return make_binary(LEQ, sv); }
+      else if(name == "float_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
+      else if(name == "float_ne") { return make_binary(NEQ, sv); }
+      else if(name == "float_ne_reif") { return make_binary_fun_eq(NEQ, sv, EQUIV); }
+      else if(name == "float_lt") { return make_binary(LT, sv); }
+      else if(name == "float_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
+      else if(name == "float_in") { return make_float_in(sv); }
       else if(name == "float_in_reif") {
-        return F::make_binary(make_float_in<F>(vs), EQUIV, std::any_cast<F>(vs[4]));
+        return F::make_binary(make_float_in(sv), EQUIV, f(sv[4]));
       }
-      else if(name == "float_log10") { return make_log_eq<F>(10, vs); }
-      else if(name == "float_log2") { return make_log_eq<F>(2, vs); }
-      else if(name == "float_min") { return make_binary_fun_eq<F>(silent, MIN, vs); }
-      else if(name == "float_max") { return make_binary_fun_eq<F>(silent, MAX, vs); }
-      else if(name == "float_exp") { return make_unary_fun_eq<F>(silent, EXP, vs); }
-      else if(name == "float_ln") { return make_unary_fun_eq<F>(silent, LN, vs); }
-      else if(name == "float_pow") { return make_binary_fun_eq<F>(silent, POW, vs); }
-      else if(name == "float_sqrt") { return make_unary_fun_eq<F>(silent, SQRT, vs); }
-      else if(name == "int2float") { return make_binary<F>(silent, EQ, vs); }
-      return F();
+      else if(name == "float_log10") { return make_log_eq(10, sv); }
+      else if(name == "float_log2") { return make_log_eq(2, sv); }
+      else if(name == "float_min") { return make_binary_fun_eq(MIN, sv); }
+      else if(name == "float_max") { return make_binary_fun_eq(MAX, sv); }
+      else if(name == "float_exp") { return make_unary_fun_eq(EXP, sv); }
+      else if(name == "float_ln") { return make_unary_fun_eq(LN, sv); }
+      else if(name == "float_pow") { return make_binary_fun_eq(POW, sv); }
+      else if(name == "float_sqrt") { return make_unary_fun_eq(SQRT, sv); }
+      else if(name == "int2float") { return make_binary(EQ, sv); }
+      else if(name == "array_int_element" || name == "array_var_int_element") {
+        // if(sv.size() < 3) {
+        //   return make_error(error, "`" + name + "` expects three parameters.");
+        // }
+        // auto index = f(sv[0]);
+        // auto value = f(sv[2]);
+        // try {
+        //   auto arrayName = f(sv[1]);
+        //   if(arrayName.is(F::LV)) {
+        //     if(arrays.contains(arrayName)) {
+        //       int size = arrays[arrayName];
+        //       for(int i = 0; i < size; ++i) {
+        //         auto varName = make_array_access(arrayName, i);
+        //         if(params.contains(varName)) {
+        //           // index == (i+1) ==> param[varName] = value
+        //         }
+        //         else {
+        //           // index == (i+1) ==> varName = value
+        //         }
+        //       }
+        //     }
+        //   }
+        //   else {
+        //     return make_error(error, "`array_int_element` expects an array as the second parameter.");
+        //   }
+        // }
+        // catch(std::bad_any_cast) {
+        //   auto array = std::any_cast<SV>(sv[1]);
+        //   for(int i = 0; i < array.size(); ++i) {
+
+        //   }
+        // }
+      }
+      return make_error(sv, "Unknown predicate `" + name + "`");
     }
 
-    template <class F>
-    F function_call(const peg::SemanticValues &vs) {
-      auto name = std::any_cast<LVar<typename F::allocator_type>>(vs[0]);
-      using namespace impl;
-      auto p = predicate_call<F>(vs, true);
-      auto pf = std::any_cast<F>(p);
-      if(!pf.is_true()) {
-        return pf;
+    F function_call(const SV &sv) {
+      auto name = std::any_cast<std::string>(sv[0]);
+      silent = true;
+      bool err = error;
+      error = false;
+      auto p = predicate_call(sv);
+      silent = false;
+      if(!error) {
+        return f(p);
       }
       else {
-        if(name == "int_abs") { return make_unary_fun<F>(ABS, vs); }
-        else if(name == "int_neg") { return make_unary_fun<F>(NEG, vs); }
-        else if(name == "int_div") { return make_binary_fun<F>(EDIV, vs); }
-        else if(name == "int_mod") { return make_binary_fun<F>(EMOD, vs); }
-        else if(name == "int_plus") { return make_binary_fun<F>(ADD, vs); }
-        else if(name == "int_minus") { return make_binary_fun<F>(SUB, vs); }
-        else if(name == "int_pow") { return make_binary_fun<F>(POW, vs); }
-        else if(name == "int_times") { return make_binary_fun<F>(MUL, vs); }
-        else if(name == "int_max") { return make_binary_fun<F>(MAX, vs); }
-        else if(name == "int_min") { return make_binary_fun<F>(MIN, vs); }
-        else if(name == "bool_and") { return make_binary_fun<F>(AND, vs); }
-        else if(name == "bool_not") { return make_unary_fun<F>(NOT, vs); }
-        else if(name == "bool_or") { return make_binary_fun<F>(OR, vs); }
-        else if(name == "bool_xor") { return make_binary_fun<F>(XOR, vs); }
-        else if(name == "set_card") { return make_unary_fun<F>(CARD, vs); }
-        else if(name == "set_diff") { return make_binary_fun<F>(DIFFERENCE, vs); }
-        else if(name == "set_intersect") { return make_binary_fun<F>(INTERSECTION, vs); }
-        else if(name == "set_union") { return make_binary_fun<F>(UNION, vs); }
-        else if(name == "set_symdiff") { return make_binary_fun<F>(SYMMETRIC_DIFFERENCE, vs); }
-        else if(name == "float_abs") { return make_binary_fun<F>(ABS, vs); }
-        else if(name == "float_neg") { return make_binary_fun<F>(NEG, vs); }
-        else if(name == "float_plus") { return make_binary_fun<F>(ADD, vs); }
-        else if(name == "float_minus") { return make_binary_fun<F>(SUB, vs); }
-        else if(name == "float_times") { return make_binary_fun<F>(MUL, vs); }
-        else if(name == "float_acos") { return make_unary_fun<F>(ACOS, vs); }
-        else if(name == "float_acosh") { return make_unary_fun<F>(ACOSH, vs); }
-        else if(name == "float_asin") { return make_unary_fun<F>(ASIN, vs); }
-        else if(name == "float_asinh") { return make_unary_fun<F>(ASINH, vs); }
-        else if(name == "float_atan") { return make_unary_fun<F>(ATAN, vs); }
-        else if(name == "float_atanh") { return make_unary_fun<F>(ATANH, vs); }
-        else if(name == "float_cos") { return make_unary_fun<F>(COS, vs); }
-        else if(name == "float_cosh") { return make_unary_fun<F>(COSH, vs); }
-        else if(name == "float_sin") { return make_unary_fun<F>(SIN, vs); }
-        else if(name == "float_sinh") { return make_unary_fun<F>(SINH, vs); }
-        else if(name == "float_tan") { return make_unary_fun<F>(TAN, vs); }
-        else if(name == "float_tanh") { return make_unary_fun<F>(TANH, vs); }
-        else if(name == "float_div") { return make_binary_fun<F>(DIV, vs); }
-        else if(name == "float_log10") { return make_log<F>(10, vs); }
-        else if(name == "float_log2") { return make_log<F>(2, vs); }
-        else if(name == "float_min") { return make_binary_fun<F>(MIN, vs); }
-        else if(name == "float_max") { return make_binary_fun<F>(MAX, vs); }
-        else if(name == "float_exp") { return make_unary_fun<F>(EXP, vs); }
-        else if(name == "float_ln") { return make_unary_fun<F>(LN, vs); }
-        else if(name == "float_pow") { return make_binary_fun<F>(POW, vs); }
-        else if(name == "float_sqrt") { return make_unary_fun<F>(SQRT, vs); }
-        return F();
+        error = err;
+        if(name == "int_abs") { return make_unary_fun(ABS, sv); }
+        else if(name == "int_neg") { return make_unary_fun(NEG, sv); }
+        else if(name == "int_div") { return make_binary_fun(EDIV, sv); }
+        else if(name == "int_mod") { return make_binary_fun(EMOD, sv); }
+        else if(name == "int_plus") { return make_binary_fun(ADD, sv); }
+        else if(name == "int_minus") { return make_binary_fun(SUB, sv); }
+        else if(name == "int_pow") { return make_binary_fun(POW, sv); }
+        else if(name == "int_times") { return make_binary_fun(MUL, sv); }
+        else if(name == "int_max") { return make_binary_fun(MAX, sv); }
+        else if(name == "int_min") { return make_binary_fun(MIN, sv); }
+        else if(name == "bool_and") { return make_binary_fun(AND, sv); }
+        else if(name == "bool_not") { return make_unary_fun(NOT, sv); }
+        else if(name == "bool_or") { return make_binary_fun(OR, sv); }
+        else if(name == "bool_xor") { return make_binary_fun(XOR, sv); }
+        else if(name == "set_card") { return make_unary_fun(CARD, sv); }
+        else if(name == "set_diff") { return make_binary_fun(DIFFERENCE, sv); }
+        else if(name == "set_intersect") { return make_binary_fun(INTERSECTION, sv); }
+        else if(name == "set_union") { return make_binary_fun(UNION, sv); }
+        else if(name == "set_symdiff") { return make_binary_fun(SYMMETRIC_DIFFERENCE, sv); }
+        else if(name == "float_abs") { return make_binary_fun(ABS, sv); }
+        else if(name == "float_neg") { return make_binary_fun(NEG, sv); }
+        else if(name == "float_plus") { return make_binary_fun(ADD, sv); }
+        else if(name == "float_minus") { return make_binary_fun(SUB, sv); }
+        else if(name == "float_times") { return make_binary_fun(MUL, sv); }
+        else if(name == "float_acos") { return make_unary_fun(ACOS, sv); }
+        else if(name == "float_acosh") { return make_unary_fun(ACOSH, sv); }
+        else if(name == "float_asin") { return make_unary_fun(ASIN, sv); }
+        else if(name == "float_asinh") { return make_unary_fun(ASINH, sv); }
+        else if(name == "float_atan") { return make_unary_fun(ATAN, sv); }
+        else if(name == "float_atanh") { return make_unary_fun(ATANH, sv); }
+        else if(name == "float_cos") { return make_unary_fun(COS, sv); }
+        else if(name == "float_cosh") { return make_unary_fun(COSH, sv); }
+        else if(name == "float_sin") { return make_unary_fun(SIN, sv); }
+        else if(name == "float_sinh") { return make_unary_fun(SINH, sv); }
+        else if(name == "float_tan") { return make_unary_fun(TAN, sv); }
+        else if(name == "float_tanh") { return make_unary_fun(TANH, sv); }
+        else if(name == "float_div") { return make_binary_fun(DIV, sv); }
+        else if(name == "float_log10") { return make_log(10, sv); }
+        else if(name == "float_log2") { return make_log(2, sv); }
+        else if(name == "float_min") { return make_binary_fun(MIN, sv); }
+        else if(name == "float_max") { return make_binary_fun(MAX, sv); }
+        else if(name == "float_exp") { return make_unary_fun(EXP, sv); }
+        else if(name == "float_ln") { return make_unary_fun(LN, sv); }
+        else if(name == "float_pow") { return make_binary_fun(POW, sv); }
+        else if(name == "float_sqrt") { return make_unary_fun(SQRT, sv); }
+        return make_error(sv, "Unknown function or predicate symbol `" + name + "`");
       }
     }
-  }
 
+    F make_statements(const SV& sv) {
+      if(sv.size() == 1) {
+        return f(sv[0]);
+      }
+      else {
+        typename F::Sequence children;
+        for(int i = 0; i < sv.size(); ++i) {
+          F formula = f(sv[i]);
+          if(!formula.is_true()) {
+            children.push_back(formula);
+          }
+        }
+        return F::make_nary(AND, std::move(children));
+      }
+    }
+
+    F make_existential(const So& ty, const std::string& name, const std::any& sv_annots) {
+      auto f = F::make_exists(UNTYPED,
+        LVar<allocator_type>(name.data()),
+        ty,
+        ty.default_approx());
+      auto annots = std::any_cast<SV>(sv_annots);
+      return update_with_annotation(f, annots);
+    }
+
+    template<class S>
+    std::string make_array_access(const S& name, int i) {
+      return std::string(name.data()) + "[" + std::to_string(i+1) + "]"; // FlatZinc array starts at 1.
+    }
+
+    F make_variable_decl(const SV& sv, const std::string& name, const std::any& typeVar, const std::any& annots) {
+      try {
+        auto ty = std::any_cast<So>(typeVar);
+        return make_existential(ty, name, annots);
+      }
+      catch(std::bad_any_cast) {
+        auto typeValue = f(typeVar);
+        auto inConstraint = F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), IN, typeValue);
+        auto sort = typeValue.sort();
+        if(!sort.has_value() || !sort->is_set()) {
+          return make_error(sv, "We only allow type-value of variables to be of type Set.");
+        }
+        auto exists = make_existential(*(sort->sub), name, annots);
+        return F::make_binary(std::move(exists), AND, std::move(inConstraint));
+      }
+    }
+  };
+}
 
   /** We parse the constraint language FlatZinc as described in the documentation: https://www.minizinc.org/doc-2.4.1/en/fzn-spec.html#specification-of-flatzinc.
    * We also extend FlatZinc conservatively for the purposes of our framework:
@@ -299,178 +597,12 @@ namespace lala {
       - Add the functions `int_minus`, `float_minus`, `int_neg`, `float_neg`.
       - Add the ability to have `true` and `false` in the `constraint` statement.
       - Parameters of predicates are not required to be flat, every constraint comes with a functional flavor, e.g., `int_le(int_plus(a,b), 5)` stands for `a+b <= 5`.
-      - Several solve items are allowed, which is useful for multi-objective optimization for instance.
+      - Several solve items are allowed, which is useful for multi-objectives optimization for instance.
   */
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
-
-    using F = TFormula<Allocator>;
-
-    peg::parser parser(R"(
-        Statements  <- (VariableDecl / ConstraintDecl / SolveItem)+
-
-        Literal     <- Boolean / Real / Integer / VariableLit
-
-        VariableLit <- Identifier
-        Identifier  <- < [a-zA-Z_][a-zA-Z0-9_]* >
-        Boolean     <- < 'true' / 'false' >
-        Real        <- < (
-             'inf'
-           / '-inf'
-           / [+-]? [0-9]+ (('.' [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
-        Integer     <- < [+-]? [0-9]+ >
-
-        VariableDecl <- 'var' Type ':' Identifier Annotations ';'
-
-        IntType <- 'int'
-        RealType <- 'float' / 'real'
-        BoolType <- 'bool'
-        SetType <- 'set' 'of' Type
-        Type <- IntType / RealType / BoolType / SetType
-
-        Annotations <- ('::' Identifier ('(' Literal ')')?)*
-
-        ConstraintDecl <- 'constraint' (PredicateCall / Boolean) Annotations ';'
-
-        LiteralInExpression <- Literal !'('
-        FunctionCall <-  Identifier '(' Parameter (',' Parameter )* ')'
-        Parameter <- LiteralInExpression / FunctionCall
-        PredicateCall <- Identifier '(' Parameter (',' Parameter)* ')'
-
-        MinimizeItem <- 'minimize' Literal
-        MaximizeItem <- 'maximize' Literal
-        SatisfyItem <- 'satisfy'
-        SolveItem <- 'solve' (MinimizeItem / MaximizeItem / SatisfyItem) ';'
-
-        %whitespace <- [ \n\r\t]*
-    )");
-
-    assert(static_cast<bool>(parser) == true);
-
-    parser["Integer"] = [](const peg::SemanticValues &vs) {
-      return F::make_z(vs.token_to_number<logic_int>());
-    };
-
-    parser["Real"] = [](const peg::SemanticValues &vs) {
-      return F::make_real(impl::string_to_real(vs.token_to_string()));
-    };
-
-    parser["Boolean"] = [](const peg::SemanticValues &vs) {
-      return vs.token_to_string() == "true" ? F::make_true() : F::make_false();
-    };
-
-    parser["Identifier"] = [](const peg::SemanticValues &vs) {
-      return LVar<Allocator>(vs.token_to_string().c_str());
-    };
-
-    parser["VariableLit"] = [](const peg::SemanticValues &vs) {
-      return F::make_lvar(UNTYPED, std::any_cast<LVar<Allocator>>(vs[0]));
-    };
-
-    parser["IntType"] = [](const peg::SemanticValues &vs) {
-      return Sort<Allocator>(Sort<Allocator>::Int);
-    };
-
-    parser["RealType"] = [](const peg::SemanticValues &vs) {
-      return Sort<Allocator>(Sort<Allocator>::Real);
-    };
-
-    parser["BoolType"] = [](const peg::SemanticValues &vs) {
-      return Sort<Allocator>(Sort<Allocator>::Bool);
-    };
-
-    parser["SetType"] = [](const peg::SemanticValues &vs) {
-      Sort<Allocator> sub_ty = std::any_cast<Sort<Allocator>>(vs[0]);
-      return Sort<Allocator>(Sort<Allocator>::Set, std::move(sub_ty));
-    };
-
-    parser["Annotations"] = [](const peg::SemanticValues &vs) {
-      return vs;
-    };
-
-    parser["VariableDecl"] = [](const peg::SemanticValues &vs) {
-      auto ty = std::any_cast<Sort<Allocator>>(vs[0]);
-      auto f = F::make_exists(UNTYPED,
-        std::any_cast<LVar<Allocator>>(vs[1]),
-        ty,
-        ty.default_approx());
-      auto annots = std::any_cast<peg::SemanticValues>(vs[2]);
-      impl::update_with_annotation(f, annots);
-      return f;
-    };
-
-    parser["ConstraintDecl"] = [](const peg::SemanticValues &vs) {
-      auto f = std::any_cast<F>(vs[0]);
-      auto annots = std::any_cast<peg::SemanticValues>(vs[1]);
-      impl::update_with_annotation(f, annots);
-      return f;
-    };
-
-    parser["FunctionCall"] = [](const peg::SemanticValues &vs) {
-      return impl::function_call<F>(vs);
-    };
-
-    parser["FunctionCall"].predicate = [](const peg::SemanticValues &vs, const std::any&, std::string &msg)
-    {
-      if(impl::function_call<F>(vs).is_true()) {
-        auto name = std::any_cast<LVar<Allocator>>(vs[0]);
-        msg = "Function " + std::string(name.data()) + " unsupported.";
-        return false;
-      }
-      return true;
-    };
-
-    parser["PredicateCall"] = [](const peg::SemanticValues &vs) {
-      return impl::predicate_call<F>(vs);
-    };
-
-    parser["PredicateCall"].predicate = [](const peg::SemanticValues &vs, const std::any&, std::string &msg)
-    {
-      if(impl::predicate_call<F>(vs).is_true()) {
-        auto name = std::any_cast<LVar<Allocator>>(vs[0]);
-        msg = "Predicate " + std::string(name.data()) + " unsupported.";
-        return false;
-      }
-      return true;
-    };
-
-    parser["Statements"] = [](const peg::SemanticValues &vs) {
-      if(vs.size() == 1) return std::any_cast<F>(vs[0]);
-      else {
-        typename F::Sequence children;
-        children.reserve(vs.size());
-        for(int i = 0; i < vs.size(); ++i) {
-          children.push_back(std::any_cast<F>(vs[i]));
-        }
-        return F::make_nary(AND, std::move(children));
-      }
-    };
-
-    parser["MinimizeItem"] = [](const peg::SemanticValues &vs) {
-      auto literal = std::any_cast<F>(vs[0]);
-      return F::make_unary(MINIMIZE, std::move(literal));
-    };
-
-    parser["MaximizeItem"] = [](const peg::SemanticValues &vs) {
-      auto literal = std::any_cast<F>(vs[0]);
-      return F::make_unary(MAXIMIZE, std::move(literal));
-    };
-
-    parser["SatisfyItem"] = [](const peg::SemanticValues &vs) {
-      return F();
-    };
-
-    parser.set_logger([](size_t line, size_t col, const std::string& msg, const std::string &rule) {
-      std::cerr << line << ":" << col << ": " << msg << "\n";
-    });
-
-    F f;
-    if(parser.parse(input.c_str(), f)) {
-      return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
-    }
-    else {
-      return nullptr;
-    }
+    impl::FlatZincParser<Allocator> parser;
+    return parser.parse(input);
   }
 
   template<class Allocator>

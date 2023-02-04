@@ -452,6 +452,33 @@ public:
       {
         return make_element_constraint(name, sv);
       }
+      else if(name == "int_lin_eq" || name == "bool_lin_eq" || name == "float_lin_eq" ||
+              name == "int_lin_eq_reif" || name == "bool_lin_eq_reif" || name == "float_lin_eq_reif")
+      {
+        return make_linear_constraint(name, EQ, sv);
+      }
+      else if(name == "int_lin_le" || name == "bool_lin_le" || name == "float_lin_le" ||
+              name == "int_lin_le_reif" || name == "bool_lin_le_reif" || name == "float_lin_le_reif")
+      {
+        return make_linear_constraint(name, LEQ, sv);
+      }
+      else if(name == "int_lin_ne" || name == "bool_lin_ne" || name == "float_lin_ne" ||
+              name == "int_lin_ne_reif" || name == "bool_lin_ne_reif" || name == "float_lin_ne_reif")
+      {
+        return make_linear_constraint(name, NEQ, sv);
+      }
+      else if(name == "array_bool_and") {
+        return make_boolean_constraint(name, AND, sv);
+      }
+      else if(name == "array_bool_or") {
+        return make_boolean_constraint(name, OR, sv);
+      }
+      else if(name == "array_bool_xor") {
+        return make_boolean_constraint(name, XOR, sv);
+      }
+      else if(name == "bool_clause" || name == "bool_clause_reif") {
+        return make_boolean_clause(name, sv);
+      }
       return make_error(sv, "Unknown predicate `" + name + "`");
     }
 
@@ -568,52 +595,116 @@ public:
         return make_error(sv, "`" + name + "` expects 3 parameters, but we got `" + std::to_string(sv.size()-1) + "` parameters");
       }
       auto index = f(sv[1]);
+      auto array = resolve_array(sv, sv[2]);
+      if(!array.is(F::Seq)) {
+        return array;
+      }
       auto value = f(sv[3]);
-      // The array can either be a literal array directly, or the name of an array.
+      typename F::Sequence seq;
+      for(int i = 0; i < array.seq().size(); ++i) {
+        // index = (i+1) ==> varName = value
+        seq.push_back(F::make_binary(
+          F::make_binary(index, EQ, F::make_z(i+1)),
+          IMPLY,
+          F::make_binary(array.seq(i), EQ, value)));
+      }
+      return F::make_nary(AND, std::move(seq));
+    }
+
+    // We return the elements inside the array in the form `arr[1] /\ arr[2] /\ ... /\ arr[N]`.
+    // The array can either be a literal array directly, or the name of an array.
+    F resolve_array(const SV& sv, const std::any& any) {
+      typename F::Sequence seq;
       try {
-        auto arrayVar = f(sv[2]);
+        auto arrayVar = f(any);
         if(arrayVar.is(F::LV)) {
           std::string arrayName(arrayVar.lv().data());
           if(arrays.contains(arrayName)) {
             int size = arrays[arrayName];
-            typename F::Sequence seq;
             for(int i = 0; i < size; ++i) {
               auto varName = make_array_access(arrayName, i);
-              // index = (i+1) ==> varName = value
-              auto index_eq = F::make_binary(index, EQ, F::make_z(i+1));
               if(params.contains(varName)) {
-                seq.push_back(F::make_binary(
-                  index_eq,
-                  IMPLY,
-                  F::make_binary(params[varName], EQ, value)));
+                seq.push_back(params[varName]);
               }
               else {
-                seq.push_back(F::make_binary(
-                  index_eq,
-                  IMPLY,
-                  F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(varName.data())), EQ, value)));
+                seq.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(varName.data())));
               }
             }
-            return F::make_nary(AND, std::move(seq));
           }
           else {
             return make_error(sv, "Unknown array parameter `" + arrayName + "`");
           }
         }
         else {
-          return make_error(sv, "`" + name + "` expects an array as the second parameter.");
+          return make_error(sv, "Expects an array or the name of an array.");
         }
       }
       catch(std::bad_any_cast) {
-        auto array = std::any_cast<SV>(sv[2]);
-        typename F::Sequence seq;
+        auto array = std::any_cast<SV>(any);
         for(int i = 0; i < array.size(); ++i) {
-          seq.push_back(F::make_binary(
-            F::make_binary(index, EQ, F::make_z(i+1)),
-            IMPLY,
-            F::make_binary(f(array[i]), EQ, value)));
+          seq.push_back(f(array[i]));
         }
-        return F::make_nary(AND, std::move(seq));
+      }
+      return F::make_nary(AND, std::move(seq));
+    }
+
+    F make_linear_constraint(const std::string& name, Sig sig, const SV& sv) {
+      if(sv.size() != 4 && sv.size() != 5) {
+        return make_error(sv, "`" + name + "` expects 3 (or 4 if reified) parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
+      }
+      auto as = resolve_array(sv, sv[1]);
+      if(!as.is(F::Seq)) { return as; }
+      auto bs = resolve_array(sv, sv[2]);
+      if(!bs.is(F::Seq)) { return bs; }
+      auto c = f(sv[3]);
+      if(as.seq().size() != bs.seq().size()) {
+        return make_error(sv, "`" + name + "` expects arrays of the same size.");
+      }
+      typename F::Sequence sum;
+      for(int i = 0; i < as.seq().size(); ++i) {
+        sum.push_back(F::make_binary(as.seq(i), MUL, bs.seq(i)));
+      }
+      auto linearCons = F::make_binary(F::make_nary(ADD, std::move(sum)), sig, c);
+      if(sv.size() == 5) { // reified version.
+        return F::make_binary(f(sv[4]), EQUIV, std::move(linearCons));
+      }
+      else {
+        return std::move(linearCons);
+      }
+    }
+
+    F make_boolean_constraint(const std::string& name, Sig sig, const SV& sv) {
+      if(sv.size() != 2 && sv.size() != 3) {
+        return make_error(sv, "`" + name + "` expects 1 (or 2 if reified) parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
+      }
+      auto array = resolve_array(sv, sv[1]);
+      if(!array.is(F::Seq)) { return array; }
+      if(sv.size() == 3) { // reified
+        return F::make_binary(f(sv[2]), EQUIV, F::make_nary(sig, array.seq()));
+      }
+      else {
+        return F::make_nary(sig, array.seq());
+      }
+    }
+
+    F make_boolean_clause(const std::string& name, const SV& sv) {
+      if(sv.size() != 3 && sv.size() != 4) {
+        return make_error(sv, "`" + name + "` expects 2 (or 3 if reified) parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
+      }
+      auto as = resolve_array(sv, sv[1]);
+      if(!as.is(F::Seq)) { return as; }
+      auto bs = resolve_array(sv, sv[2]);
+      if(!bs.is(F::Seq)) { return bs; }
+      typename F::Sequence negs;
+      for(int i = 0; i < bs.seq().size(); ++i) {
+        negs.push_back(F::make_unary(NEG, bs.seq(i)));
+      }
+      F clause = F::make_binary(F::make_nary(OR, as.seq()), OR, F::make_nary(OR, negs));
+      if(sv.size() == 4) {
+        return F::make_binary(f(sv[3]), EQUIV, std::move(clause));
+      }
+      else {
+        return std::move(clause);
       }
     }
   };

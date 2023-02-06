@@ -65,20 +65,20 @@ public:
   CUDA void print_solution(const Env& env, const A& sol) const {
     for(int i = 0; i < output_vars.size(); ++i) {
       printf("%s=", output_vars[i].data());
-      AVar avar = env.variable_of(output_vars[i]).avars[0];
+      AVar avar = env.variable_of(output_vars[i])->avars[0];
       sol.project(avar).lb().print();
       printf(";\n");
     }
     for(int i = 0; i < output_arrays.size(); ++i) {
       const auto& dims = battery::get<1>(output_arrays[i]);
       const auto& array_vars = battery::get<2>(output_arrays[i]);
-      printf("%s=array%dd(", battery::get<0>(output_arrays[i]).data(), dims.size());
+      printf("%s=array%ldd(", battery::get<0>(output_arrays[i]).data(), dims.size());
       for(int j = 0; j < dims.size(); ++j) {
         printf("%d..%d,", battery::get<0>(dims[j]), battery::get<1>(dims[j]));
       }
       printf("[");
       for(int j = 0; j < array_vars.size(); ++j) {
-        AVar avar = env.variable_of(array_vars[j]).avars[0];
+        AVar avar = env.variable_of(array_vars[j])->avars[0];
         sol.project(avar).lb().print();
         if(j+1 != array_vars.size()) {
           printf(",");

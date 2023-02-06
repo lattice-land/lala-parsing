@@ -17,6 +17,79 @@
 #include "shared_ptr.hpp"
 
 namespace lala {
+
+template<class Allocator>
+class FlatZincOutput {
+  using bstring = battery::string<Allocator>;
+  template<class T> using bvector = battery::vector<T, Allocator>;
+  using array_dim_t = bvector<battery::tuple<int,int>>;
+  using F = TFormula<Allocator>;
+
+  bvector<bstring> output_vars;
+  // For each array, we store its output dimension characteristics and the list of the variables in the array.
+  bvector<battery::tuple<bstring, array_dim_t, bvector<bstring>>> output_arrays;
+
+public:
+  CUDA FlatZincOutput() = default;
+  CUDA FlatZincOutput(FlatZincOutput&&) = default;
+
+  void add_array_var(const std::string& name, const bstring& var_name, const peg::SemanticValues& sv) {
+    int idx = -1;
+    auto array_name = bstring(name.data());
+    for(int i = 0; i < output_arrays.size(); ++i) {
+      if(battery::get<0>(output_arrays[i]) == array_name) {
+        idx = i;
+        break;
+      }
+    }
+    if(idx == -1) {
+      output_arrays.push_back(battery::make_tuple<bstring, array_dim_t, bvector<bstring>>(bstring(array_name), {}, {}));
+      idx = output_arrays.size() - 1;
+      // Add the dimension of the array.
+      for(int i = 0; i < sv.size(); ++i) {
+        auto range = std::any_cast<F>(sv[i]);
+        for(int j = 0; j < range.s().size(); ++j) {
+          const auto& itv = range.s()[j];
+          battery::get<1>(output_arrays[idx]).push_back(battery::make_tuple(battery::get<0>(itv).z(), battery::get<1>(itv).z()));
+        }
+      }
+    }
+    battery::get<2>(output_arrays[idx]).push_back(var_name);
+  }
+
+  void add_var(const bstring& var_name) {
+    output_vars.push_back(var_name);
+  }
+
+  template <class Env, class A>
+  CUDA void print_solution(const Env& env, const A& sol) const {
+    for(int i = 0; i < output_vars.size(); ++i) {
+      printf("%s=", output_vars[i].data());
+      AVar avar = env.variable_of(output_vars[i]).avars[0];
+      sol.project(avar).lb().print();
+      printf(";\n");
+    }
+    for(int i = 0; i < output_arrays.size(); ++i) {
+      const auto& dims = battery::get<1>(output_arrays[i]);
+      const auto& array_vars = battery::get<2>(output_arrays[i]);
+      printf("%s=array%dd(", battery::get<0>(output_arrays[i]).data(), dims.size());
+      for(int j = 0; j < dims.size(); ++j) {
+        printf("%d..%d,", battery::get<0>(dims[j]), battery::get<1>(dims[j]));
+      }
+      printf("[");
+      for(int j = 0; j < array_vars.size(); ++j) {
+        AVar avar = env.variable_of(array_vars[j]).avars[0];
+        sol.project(avar).lb().print();
+        if(j+1 != array_vars.size()) {
+          printf(",");
+        }
+      }
+      printf("]);\n");
+    }
+  }
+};
+
+
   namespace impl {
     /** Unfortunately, I'm really not sure this function works in all cases due to compiler bugs with rounding modes... */
     inline logic_real string_to_real(const std::string& s) {
@@ -46,9 +119,10 @@ class FlatZincParser {
   std::map<std::string, int> arrays; // Size of all named arrays (parameters and variables).
   bool error; // If an error was found during parsing.
   bool silent; // If we do not want to output error messages.
+  FlatZincOutput<Allocator>& output;
 
 public:
-  FlatZincParser(): error(false), silent(false) {}
+  FlatZincParser(FlatZincOutput<Allocator>& output): error(false), silent(false), output(output) {}
 
   battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
     peg::parser parser(R"(
@@ -87,7 +161,8 @@ public:
       SetType <- 'set' 'of' Type
       Type <- IntType / RealType / BoolType / SetType
 
-      Annotations <- ('::' Identifier ('(' RangeLiteral ')')?)*
+      Annotation <- Identifier ('(' Parameter (',' Parameter)* ')')?
+      Annotations <- ('::'  Annotation)*
 
       ConstraintDecl <- 'constraint' (PredicateCall / Boolean) Annotations ';'
 
@@ -130,13 +205,13 @@ public:
     parser["BoolType"] = [](const SV &sv) { return So(So::Bool); };
     parser["SetType"] = [](const SV &sv) { return So(So::Set, std::any_cast<Sort<Allocator>>(sv[0])); };
     parser["Annotations"] = [](const SV &sv) { return sv; };
+    parser["Annotation"] = [](const SV &sv) { return sv; };
     // When we have `var set of 1..5: s;`, what it means is that `s in {}..{1..5}`, i.e., a set between {} and {1..5}.
     parser["SetValue"] = [](const SV &sv) { return F::make_set(Set({battery::make_tuple(F::make_set(Set{}), f(sv[0]))})); };
     parser["VariableDecl"] = [this](const SV &sv) { return make_variable_init_decl(sv); };
     parser["VarArrayDecl"] = [this](const SV &sv) { return make_variable_array_decl(sv); };
-    parser["ConstraintDecl"] = [this](const SV &sv) { return update_with_annotation(f(sv[0]), std::any_cast<SV>(sv[1])); };
+    parser["ConstraintDecl"] = [this](const SV &sv) { return update_with_annotations(sv, f(sv[0]), std::any_cast<SV>(sv[1])); };
     parser["FunctionCall"] = [this](const SV &sv) { return function_call(sv); };
-    parser["LiteralArray"] = [](const SV &sv) { return sv; };
     parser["PredicateCall"] = [this](const SV &sv) { return predicate_call(sv); };
     parser["Statements"] = [this](const SV &sv) { return make_statements(sv); };
     parser["MinimizeItem"] = [](const SV &sv) { return F::make_unary(MINIMIZE, f(sv[0])); };
@@ -291,25 +366,33 @@ public:
       return F::make_nary(AND, std::move(decl));
     }
 
-    F update_with_annotation(F formula, const SV& annots) {
+    F update_with_annotations(const SV& sv, F formula, const SV& annots) {
       for(int i = 0; i < annots.size(); ++i) {
-        auto name = std::any_cast<std::string>(annots[i]);
+        auto annot = std::any_cast<SV>(annots[i]);
+        auto name = std::any_cast<std::string>(annot[0]);
         if(name == "abstract") {
-          ++i;
-          AType ty = f(annots[i]).z();
+          AType ty = f(annot[1]).z();
           formula.type_as(ty);
         }
         else if(name == "under") { formula.approx_as(UNDER); }
         else if(name == "exact") { formula.approx_as(EXACT); }
         else if(name == "over") { formula.approx_as(OVER); }
         else if(name == "is_defined_var") {}
+        else if(name == "defines_var") {}
         else if(name == "var_is_introduced") {}
-        else if(name == "output_var") {}
+        else if(name == "output_var" && formula.is(F::E)) {
+          output.add_var(battery::get<0>(formula.exists()));
+        }
+        else if(name == "output_array" && formula.is(F::E)) {
+          auto array_name = std::any_cast<std::string>(sv[2]);
+          auto dims = std::any_cast<SV>(annot[1]);
+          output.add_array_var(array_name, battery::get<0>(formula.exists()), dims);
+        }
         else {
-          return make_error(annots, "Annotation " + name + " is unknown.");
+          std::cerr << "Annotation " + name + " is unknown was ignored." << std::endl;
         }
       }
-      return formula;
+      return std::move(formula);
     }
 
     F make_binary(Sig sig, const SV &sv) {
@@ -571,13 +654,13 @@ public:
       }
     }
 
-    F make_existential(const So& ty, const std::string& name, const std::any& sv_annots) {
+    F make_existential(const SV& sv, const So& ty, const std::string& name, const std::any& sv_annots) {
       auto f = F::make_exists(UNTYPED,
         LVar<allocator_type>(name.data()),
         ty,
         ty.default_approx());
       auto annots = std::any_cast<SV>(sv_annots);
-      return update_with_annotation(f, annots);
+      return update_with_annotations(sv, f, annots);
     }
 
     template<class S>
@@ -603,7 +686,7 @@ public:
     F make_variable_decl(const SV& sv, const std::string& name, const std::any& typeVar, const std::any& annots) {
       try {
         auto ty = std::any_cast<So>(typeVar);
-        return make_existential(ty, name, annots);
+        return make_existential(sv, ty, name, annots);
       }
       catch(std::bad_any_cast) {
         auto typeValue = f(typeVar);
@@ -612,7 +695,7 @@ public:
         if(!sort.has_value() || !sort->is_set()) {
           return make_error(sv, "We only allow type-value of variables to be of type Set.");
         }
-        auto exists = make_existential(*(sort->sub), name, annots);
+        auto exists = make_existential(sv, *(sort->sub), name, annots);
         return F::make_binary(std::move(exists), AND, std::move(inConstraint));
       }
     }
@@ -745,19 +828,31 @@ public:
       - Add the functions `int_minus`, `float_minus`, `int_neg`, `float_neg`.
       - Add the ability to have `true` and `false` in the `constraint` statement.
       - Parameters of predicates are not required to be flat, every constraint comes with a functional flavor, e.g., `int_le(int_plus(a,b), 5)` stands for `a+b <= 5`.
-      - Several solve items are allowed, which is useful for multi-objectives optimization for instance.
+      - Several solve items are allowed, which is useful for multi-objectives optimization.
   */
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
-    impl::FlatZincParser<Allocator> parser;
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, FlatZincOutput<Allocator>& output) {
+    impl::FlatZincParser<Allocator> parser(output);
     return parser.parse(input);
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, FlatZincOutput<Allocator>& output) {
     std::ifstream t(filename);
     std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-    return parse_flatzinc_str<Allocator>(input);
+    return parse_flatzinc_str<Allocator>(input, output);
+  }
+
+  template<class Allocator>
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
+    FlatZincOutput<Allocator> output;
+    return parse_flatzinc_str(input, output);
+  }
+
+  template<class Allocator>
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename) {
+    FlatZincOutput<Allocator> output;
+    return parse_flatzinc(filename, output);
   }
 }
 

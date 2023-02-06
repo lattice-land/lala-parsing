@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
     std::cerr << "Could not parse the FlatZinc input\n" << std::endl;
   }
   else {
-    f->print(true, true);
+    f->print(false, false);
   }
   return 0;
 }

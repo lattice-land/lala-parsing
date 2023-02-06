@@ -44,8 +44,8 @@ class FlatZincParser {
 
   std::map<std::string, F> params; // Name and value of the parameters occuring in the model.
   std::map<std::string, int> arrays; // Size of all named arrays (parameters and variables).
-  bool error;
-  bool silent;
+  bool error; // If an error was found during parsing.
+  bool silent; // If we do not want to output error messages.
 
 public:
   FlatZincParser(): error(false), silent(false) {}
@@ -71,8 +71,8 @@ public:
       SetRange <- InnerSetRange
       ArrayAccess <- Identifier '[' (VariableLit / Integer) ']'
 
-      VariableDecl <- 'var' ValueType ':' Identifier Annotations ';'
-      VarArrayDecl <- 'array' '[' IndexSet ']' 'of' 'var' ValueType ':' Identifier Annotations ';'
+      VariableDecl <- 'var' ValueType ':' Identifier Annotations ('=' Literal)? ';'
+      VarArrayDecl <- 'array' '[' IndexSet ']' 'of' 'var' ValueType ':' Identifier Annotations ('=' LiteralArray)? ';'
 
       SetValue <- 'set' 'of' (SetRange / Set)
 
@@ -132,7 +132,7 @@ public:
     parser["Annotations"] = [](const SV &sv) { return sv; };
     // When we have `var set of 1..5: s;`, what it means is that `s in {}..{1..5}`, i.e., a set between {} and {1..5}.
     parser["SetValue"] = [](const SV &sv) { return F::make_set(Set({battery::make_tuple(F::make_set(Set{}), f(sv[0]))})); };
-    parser["VariableDecl"] = [this](const SV &sv) { return make_variable_decl(sv, std::any_cast<std::string>(sv[1]), sv[0], sv[2]); };
+    parser["VariableDecl"] = [this](const SV &sv) { return make_variable_init_decl(sv); };
     parser["VarArrayDecl"] = [this](const SV &sv) { return make_variable_array_decl(sv); };
     parser["ConstraintDecl"] = [this](const SV &sv) { return update_with_annotation(f(sv[0]), std::any_cast<SV>(sv[1])); };
     parser["FunctionCall"] = [this](const SV &sv) { return function_call(sv); };
@@ -148,11 +148,11 @@ public:
 
     F f;
     if(parser.parse(input.c_str(), f) && !error) {
-      for(const auto& paramValue : params) {
-        std::cout << paramValue.first << " = ";
-        paramValue.second.print(false);
-        std::cout << std::endl;
-      }
+      // for(const auto& paramValue : params) {
+      //   std::cout << paramValue.first << " = ";
+      //   paramValue.second.print(false);
+      //   std::cout << std::endl;
+      // }
       return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
     }
     else {
@@ -275,6 +275,18 @@ public:
       battery::vector<F, Allocator> decl;
       for(int i = 0; i < arraySize; ++i) {
         decl.push_back(make_variable_decl(sv, make_array_access(name, i), sv[1], sv[3]));
+      }
+      if(sv.size() == 5) {
+        auto array = resolve_array(sv, sv[4]);
+        if(!array.is(F::Seq)) {
+          return array;
+        }
+        for(int i = 0; i < array.seq().size(); ++i) {
+          decl.push_back(F::make_binary(
+            F::make_lvar(UNTYPED, LVar<Allocator>(make_array_access(name, i))),
+            EQ,
+            array.seq(i)));
+        }
       }
       return F::make_nary(AND, std::move(decl));
     }
@@ -571,6 +583,21 @@ public:
     template<class S>
     std::string make_array_access(const S& name, int i) {
       return std::string(name.data()) + "[" + std::to_string(i+1) + "]"; // FlatZinc array starts at 1.
+    }
+
+    F make_variable_init_decl(const SV& sv) {
+      auto name = std::any_cast<std::string>(sv[1]);
+      auto var_decl = make_variable_decl(sv, name, sv[0], sv[2]);
+      if(sv.size() == 4) {
+        return F::make_binary(std::move(var_decl), AND,
+          F::make_binary(
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())),
+            EQ,
+            f(sv[3])));
+      }
+      else {
+        return std::move(var_decl);
+      }
     }
 
     F make_variable_decl(const SV& sv, const std::string& name, const std::any& typeVar, const std::any& annots) {

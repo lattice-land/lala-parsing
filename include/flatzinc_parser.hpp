@@ -30,8 +30,8 @@ class FlatZincOutput {
   bvector<battery::tuple<bstring, array_dim_t, bvector<bstring>>> output_arrays;
 
 public:
-  CUDA FlatZincOutput() = default;
-  CUDA FlatZincOutput(FlatZincOutput&&) = default;
+  FlatZincOutput() = default;
+  FlatZincOutput(FlatZincOutput&&) = default;
 
   void add_array_var(const std::string& name, const bstring& var_name, const peg::SemanticValues& sv) {
     int idx = -1;

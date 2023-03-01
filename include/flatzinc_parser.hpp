@@ -281,7 +281,7 @@ public:
           else if(element.is(F::LV)) {
             std::string name(element.lv().data());
             if(params.contains(name)) {
-              set.push_back(std::make_tuple(params[name], params[name]));
+              set.push_back(battery::make_tuple(params[name], params[name]));
               element_added = true;
             }
             else {
@@ -289,7 +289,7 @@ public:
             }
           }
           if(!element_added) {
-            set.push_back(std::make_tuple(element, element));
+            set.push_back(battery::make_tuple(element, element));
           }
         }
       }

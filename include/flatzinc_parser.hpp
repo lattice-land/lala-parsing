@@ -33,6 +33,12 @@ public:
   FlatZincOutput() = default;
   FlatZincOutput(FlatZincOutput&&) = default;
 
+  template<class Alloc2>
+  CUDA FlatZincOutput(const FlatZincOutput<Alloc2>& other, const Allocator& allocator = Allocator())
+    : output_vars(other.output_vars, allocator)
+    , output_arrays(other.output_arrays, allocator)
+  {}
+
   void add_array_var(const std::string& name, const bstring& var_name, const peg::SemanticValues& sv) {
     int idx = -1;
     auto array_name = bstring(name.data());

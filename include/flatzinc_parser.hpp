@@ -380,9 +380,6 @@ public:
           AType ty = f(annot[1]).z();
           formula.type_as(ty);
         }
-        else if(name == "under") { formula.approx_as(UNDER); }
-        else if(name == "exact") { formula.approx_as(EXACT); }
-        else if(name == "over") { formula.approx_as(OVER); }
         else if(name == "is_defined_var") {}
         else if(name == "defines_var") {}
         else if(name == "var_is_introduced") {}
@@ -663,8 +660,7 @@ public:
     F make_existential(const SV& sv, const So& ty, const std::string& name, const std::any& sv_annots) {
       auto f = F::make_exists(UNTYPED,
         LVar<allocator_type>(name.data()),
-        ty,
-        ty.default_approx());
+        ty);
       auto annots = std::any_cast<SV>(sv_annots);
       return update_with_annotations(sv, f, annots);
     }

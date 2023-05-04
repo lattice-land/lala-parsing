@@ -1,7 +1,7 @@
 // Copyright 2022 Pierre Talbot
 
-#include "XCSP3_parser.hpp"
-#include "allocator.hpp"
+#include "battery/allocator.hpp"
+#include "lala/XCSP3_parser.hpp"
 
 using namespace lala;
 
@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     printf("usage: %s <XCSP3-filename.xml>\n", argv[0]);
     return 1;
   }
-  auto f = parse_xcsp3<battery::StandardAllocator>(argv[1]);
+  auto f = parse_xcsp3<battery::standard_allocator>(argv[1]);
   f->print(false);
   return 0;
 }

@@ -13,8 +13,8 @@
 #include <iostream>
 #include <cfenv>
 
-#include "logic/ast.hpp"
-#include "shared_ptr.hpp"
+#include "battery/shared_ptr.hpp"
+#include "lala/logic/ast.hpp"
 
 namespace lala {
 

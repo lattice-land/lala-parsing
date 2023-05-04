@@ -11,8 +11,8 @@
 #include "XCSP3Variable.h"
 #include "XCSP3CoreParser.h"
 
-#include "logic/ast.hpp"
-#include "shared_ptr.hpp"
+#include "lala/logic/ast.hpp"
+#include "battery/shared_ptr.hpp"
 
 namespace XCSP3Core {
   template <class Allocator>

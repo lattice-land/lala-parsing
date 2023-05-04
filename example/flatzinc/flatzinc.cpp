@@ -1,7 +1,7 @@
 // Copyright 2022 Pierre Talbot
 
-#include "flatzinc_parser.hpp"
-#include "allocator.hpp"
+#include "battery/allocator.hpp"
+#include "lala/flatzinc_parser.hpp"
 
 using namespace lala;
 
@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     printf("usage: %s <flatzinc-filename.fzn>\n", argv[0]);
     return 1;
   }
-  auto f = parse_flatzinc<battery::StandardAllocator>(argv[1]);
+  auto f = parse_flatzinc<battery::standard_allocator>(argv[1]);
   if(!f) {
     std::cerr << "Could not parse the FlatZinc input\n" << std::endl;
   }

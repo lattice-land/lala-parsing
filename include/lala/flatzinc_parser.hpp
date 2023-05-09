@@ -120,6 +120,8 @@ class FlatZincParser {
   using SV = peg::SemanticValues;
   using Set = logic_set<F, allocator_type>;
   using So = Sort<allocator_type>;
+  using bstring = battery::string<Allocator>;
+  using FSeq = typename F::Sequence;
 
   std::map<std::string, F> params; // Name and value of the parameters occuring in the model.
   std::map<std::string, int> arrays; // Size of all named arrays (parameters and variables).
@@ -180,7 +182,12 @@ public:
       MinimizeItem <- 'minimize' RangeLiteral
       MaximizeItem <- 'maximize' RangeLiteral
       SatisfyItem <- 'satisfy'
-      SolveItem <- 'solve' (MinimizeItem / MaximizeItem / SatisfyItem) ';'
+      SolveItem <- 'solve' SearchAnnotations (MinimizeItem / MaximizeItem / SatisfyItem) ';'
+
+      SearchAnnotations <- ('::' SearchAnnotation)*
+      SearchAnnotation <- SeqSearch / BaseSearch
+      SeqSearch <- 'seq_search' '(' '[' SearchAnnotation (',' SearchAnnotation)* ']' ')'
+      BaseSearch <- ('int_search' / 'bool_search' / 'set_search') '(' (Identifier / LiteralArray) ',' Identifier ',' Identifier ',' Identifier ')'
 
       LiteralArray <- '[' RangeLiteral (',' RangeLiteral)* ']'
       ParameterExpr <- RangeLiteral / LiteralArray
@@ -223,6 +230,10 @@ public:
     parser["MinimizeItem"] = [](const SV &sv) { return F::make_unary(MINIMIZE, f(sv[0])); };
     parser["MaximizeItem"] = [](const SV &sv) { return F::make_unary(MAXIMIZE, f(sv[0])); };
     parser["SatisfyItem"] = [](const SV &sv) { return F(); };
+    parser["SolveItem"] = [this](const SV &sv) { return make_solve_item(sv);};
+    parser["SearchAnnotations"] = [this](const SV &sv) { return make_search_annotations(sv);};
+    parser["BaseSearch"] = [this](const SV &sv) { return make_base_search(sv);};
+    parser["SeqSearch"] = [this](const SV &sv) { return make_seq_search(sv);};
     parser.set_logger([](size_t line, size_t col, const std::string& msg, const std::string &rule) {
       std::cerr << line << ":" << col << ": " << msg << "\n";
     });
@@ -646,7 +657,7 @@ public:
         return f(sv[0]);
       }
       else {
-        typename F::Sequence children;
+        FSeq children;
         for(int i = 0; i < sv.size(); ++i) {
           F formula = f(sv[i]);
           if(!formula.is_true()) {
@@ -712,7 +723,7 @@ public:
         return array;
       }
       auto value = f(sv[3]);
-      typename F::Sequence seq;
+      FSeq seq;
       for(int i = 0; i < array.seq().size(); ++i) {
         // index = (i+1) ==> varName = value
         seq.push_back(F::make_binary(
@@ -726,7 +737,7 @@ public:
     // We return the elements inside the array in the form `arr[1] /\ arr[2] /\ ... /\ arr[N]`.
     // The array can either be a literal array directly, or the name of an array.
     F resolve_array(const SV& sv, const std::any& any) {
-      typename F::Sequence seq;
+      FSeq seq;
       try {
         auto arrayVar = f(any);
         if(arrayVar.is(F::LV)) {
@@ -772,7 +783,7 @@ public:
       if(as.seq().size() != bs.seq().size()) {
         return make_error(sv, "`" + name + "` expects arrays of the same size.");
       }
-      typename F::Sequence sum;
+      FSeq sum;
       for(int i = 0; i < as.seq().size(); ++i) {
         sum.push_back(F::make_binary(as.seq(i), MUL, bs.seq(i)));
       }
@@ -807,7 +818,7 @@ public:
       if(!as.is(F::Seq)) { return as; }
       auto bs = resolve_array(sv, sv[2]);
       if(!bs.is(F::Seq)) { return bs; }
-      typename F::Sequence negs;
+      FSeq negs;
       for(int i = 0; i < bs.seq().size(); ++i) {
         negs.push_back(F::make_unary(NEG, bs.seq(i)));
       }
@@ -817,6 +828,62 @@ public:
       }
       else {
         return std::move(clause);
+      }
+    }
+
+    F make_solve_item(const SV& sv) {
+      if(sv.size() == 1) {
+        return f(sv[0]);
+      }
+      else {
+        if(f(sv[1]).is_true()) {
+          return f(sv[0]);
+        }
+        else {
+          return F::make_binary(f(sv[0]), AND, f(sv[1]));
+        }
+      }
+    }
+
+    void make_seq_search(const SV& sv, FSeq& seq) {
+      for(int i = 0; i < sv.size(); ++i) {
+        const auto& sub_search = f(sv[i]);
+        if(sub_search.is(F::Seq) && sub_search.sig() == AND) {
+          for(int j = 0; j < sub_search.seq().size(); ++j) {
+            seq.push_back(sub_search.seq(j));
+          }
+        }
+        else {
+          seq.push_back(sub_search);
+        }
+      }
+    }
+
+    F make_seq_search(const SV& sv) {
+      FSeq seq;
+      make_seq_search(sv, seq);
+      return F::make_nary(AND, seq);
+    }
+
+    F make_base_search(const SV& sv) {
+      FSeq seq;
+      seq.push_back(F::make_nary(bstring(any_cast<std::string>(sv[1]).data()), FSeq{}));
+      seq.push_back(F::make_nary(bstring(any_cast<std::string>(sv[2]).data()), FSeq{}));
+      auto array = resolve_array(sv, sv[0]);
+      for(int i = 0; i < array.seq().size(); ++i) {
+        if(array.seq(i).is_variable()) {
+          seq.push_back(array.seq(i));
+        }
+      }
+      return F::make_nary("search", seq);
+    }
+
+    F make_search_annotations(const SV& sv) {
+      if(sv.size() == 1) {
+        return f(sv[0]);
+      }
+      else {
+        return make_seq_search(sv);
       }
     }
   };

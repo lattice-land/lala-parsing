@@ -187,7 +187,7 @@ public:
       SearchAnnotations <- ('::' SearchAnnotation)*
       SearchAnnotation <- SeqSearch / BaseSearch
       SeqSearch <- 'seq_search' '(' '[' SearchAnnotation (',' SearchAnnotation)* ']' ')'
-      BaseSearch <- ('int_search' / 'bool_search' / 'set_search') '(' (Identifier / LiteralArray) ',' Identifier ',' Identifier ',' Identifier ')'
+      BaseSearch <- ('int_search' / 'bool_search' / 'set_search') '(' (VariableLit / LiteralArray) ',' Identifier ',' Identifier ',' Identifier ')'
 
       LiteralArray <- '[' RangeLiteral (',' RangeLiteral)* ']'
       ParameterExpr <- RangeLiteral / LiteralArray
@@ -763,9 +763,14 @@ public:
         }
       }
       catch(std::bad_any_cast) {
-        auto array = std::any_cast<SV>(any);
-        for(int i = 0; i < array.size(); ++i) {
-          seq.push_back(f(array[i]));
+        try {
+          auto array = std::any_cast<SV>(any);
+          for(int i = 0; i < array.size(); ++i) {
+            seq.push_back(f(array[i]));
+          }
+        }
+        catch(std::bad_any_cast) {
+          return make_error(sv, "Expects an array of valid elements.");
         }
       }
       return F::make_nary(AND, std::move(seq));

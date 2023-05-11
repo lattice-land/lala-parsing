@@ -30,6 +30,9 @@ class FlatZincOutput {
   bvector<battery::tuple<bstring, array_dim_t, bvector<bstring>>> output_arrays;
 
 public:
+  template <class Alloc2>
+  friend class FlatZincOutput;
+
   FlatZincOutput() = default;
   FlatZincOutput(FlatZincOutput&&) = default;
 

@@ -875,8 +875,8 @@ public:
 
     F make_base_search(const SV& sv) {
       FSeq seq;
-      seq.push_back(F::make_nary(bstring(any_cast<std::string>(sv[1]).data()), FSeq{}));
-      seq.push_back(F::make_nary(bstring(any_cast<std::string>(sv[2]).data()), FSeq{}));
+      seq.push_back(F::make_nary(bstring(std::any_cast<std::string>(sv[1]).data()), FSeq{}));
+      seq.push_back(F::make_nary(bstring(std::any_cast<std::string>(sv[2]).data()), FSeq{}));
       auto array = resolve_array(sv, sv[0]);
       for(int i = 0; i < array.seq().size(); ++i) {
         if(array.seq(i).is_variable()) {

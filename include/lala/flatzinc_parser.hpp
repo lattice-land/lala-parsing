@@ -33,7 +33,11 @@ public:
   template <class Alloc2>
   friend class FlatZincOutput;
 
-  FlatZincOutput() = default;
+  CUDA FlatZincOutput(const Allocator& alloc)
+    : output_vars(alloc)
+    , output_arrays(alloc)
+  {}
+
   FlatZincOutput(FlatZincOutput&&) = default;
 
   template<class Alloc2>

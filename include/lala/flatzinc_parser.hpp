@@ -925,14 +925,14 @@ public:
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input) {
-    FlatZincOutput<Allocator> output;
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, const Allocator& allocator = Allocator()) {
+    FlatZincOutput<Allocator> output(allocator);
     return parse_flatzinc_str(input, output);
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename) {
-    FlatZincOutput<Allocator> output;
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, const Allocator& allocator = Allocator()) {
+    FlatZincOutput<Allocator> output(allocator);
     return parse_flatzinc(filename, output);
   }
 }

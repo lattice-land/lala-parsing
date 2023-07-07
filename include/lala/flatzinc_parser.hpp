@@ -1,7 +1,7 @@
 // Copyright 2022 Pierre Talbot
 
-#ifndef FLATZINC_PARSER_HPP
-#define FLATZINC_PARSER_HPP
+#ifndef LALA_PARSING_FLATZINC_PARSER_HPP
+#define LALA_PARSING_FLATZINC_PARSER_HPP
 
 #include "peglib.h"
 #include <cassert>

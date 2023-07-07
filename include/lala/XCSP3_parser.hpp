@@ -1,7 +1,7 @@
 // Copyright 2022 Pierre Talbot
 
-#ifndef  XCSP3_PARSER_HPP
-#define  XCSP3_PARSER_HPP
+#ifndef LALA_PARSING_XCSP3_PARSER_HPP
+#define LALA_PARSING_XCSP3_PARSER_HPP
 
 #include <iostream>
 #include <optional>

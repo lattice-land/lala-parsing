@@ -1,10 +1,6 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 
-if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24.0")
-  cmake_policy(SET CMP0135 NEW)
-endif()
-
-include(FetchContent)
+cmake_policy(SET CMP0135 NEW)
 
 project(lala-parsing
   VERSION 1.0.0
@@ -14,10 +10,12 @@ option(LALAPARSING_BUILD_EXAMPLES "LALAPARSING_BUILD_EXAMPLES" OFF)
 
 # Dependencies
 
+include(FetchContent)
+
 FetchContent_Declare(
   lala_core
   GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
-  GIT_TAG        develop
+  GIT_TAG        main
 )
 
 FetchContent_Declare(

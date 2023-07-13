@@ -12,6 +12,7 @@
 #include <streambuf>
 #include <iostream>
 #include <cfenv>
+#include <set>
 
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
@@ -136,6 +137,10 @@ class FlatZincParser {
   bool silent; // If we do not want to output error messages.
   FlatZincOutput<Allocator>& output;
 
+  // Contains all the annotations ignored.
+  // It is used to avoid printing an error message more than once per annotation.
+  std::set<std::string> ignored_annotations;
+
 public:
   FlatZincParser(FlatZincOutput<Allocator>& output): error(false), silent(false), output(output) {}
 
@@ -196,7 +201,7 @@ public:
       SeqSearch <- 'seq_search' '(' '[' SearchAnnotation (',' SearchAnnotation)* ']' ')'
       BaseSearch <- ('int_search' / 'bool_search' / 'set_search') '(' (VariableLit / LiteralArray) ',' Identifier ',' Identifier ',' Identifier ')'
 
-      LiteralArray <- '[' RangeLiteral (',' RangeLiteral)* ']'
+      LiteralArray <- '[]' / '[' RangeLiteral (',' RangeLiteral)* ']'
       ParameterExpr <- RangeLiteral / LiteralArray
       IndexSet <- '1' '..' Integer
       ArrayType <- 'array' '[' IndexSet ']' 'of' Type
@@ -410,7 +415,10 @@ public:
           output.add_array_var(array_name, battery::get<0>(formula.exists()), dims);
         }
         else {
-          std::cerr << "Annotation " + name + " is unknown was ignored." << std::endl;
+          if(!ignored_annotations.contains(name)) {
+            ignored_annotations.insert(name);
+            std::cerr << "Annotation " + name + " is unknown and was ignored." << std::endl;
+          }
         }
       }
       return std::move(formula);

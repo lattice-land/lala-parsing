@@ -12,10 +12,11 @@ int main(int argc, char *argv[]) {
   }
   auto f = parse_flatzinc<battery::standard_allocator>(argv[1]);
   if(!f) {
-    std::cerr << "Could not parse the FlatZinc input\n" << std::endl;
+    std::cerr << "Could not parse the FlatZinc file " << argv[1] << std::endl;
+    return 1;
   }
   else {
-    f->print(false);
+    std::cout << "Successful parsing of the file " << argv[1] << std::endl;
   }
   return 0;
 }

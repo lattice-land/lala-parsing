@@ -252,11 +252,6 @@ public:
 
     F f;
     if(parser.parse(input.c_str(), f) && !error) {
-      // for(const auto& paramValue : params) {
-      //   std::cout << paramValue.first << " = ";
-      //   paramValue.second.print(false);
-      //   std::cout << std::endl;
-      // }
       return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
     }
     else {
@@ -807,7 +802,10 @@ public:
       for(int i = 0; i < as.seq().size(); ++i) {
         sum.push_back(F::make_binary(as.seq(i), MUL, bs.seq(i)));
       }
-      auto linearCons = F::make_binary(F::make_nary(ADD, std::move(sum)), sig, c);
+      F linearCons =
+          sum.size() == 1
+        ? F::make_binary(std::move(sum[0]), sig, c)
+        : F::make_binary(F::make_nary(ADD, std::move(sum)), sig, c);
       if(sv.size() == 5) { // reified version.
         return F::make_binary(f(sv[4]), EQUIV, std::move(linearCons));
       }
@@ -928,8 +926,14 @@ public:
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, FlatZincOutput<Allocator>& output) {
     std::ifstream t(filename);
-    std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
-    return parse_flatzinc_str<Allocator>(input, output);
+    if(t.is_open()) {
+      std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
+      return parse_flatzinc_str<Allocator>(input, output);
+    }
+    else {
+      std::cerr << "File `" << filename << "` does not exists:." << std::endl;
+    }
+    return nullptr;
   }
 
   template<class Allocator>

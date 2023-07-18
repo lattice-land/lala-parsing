@@ -80,7 +80,18 @@ public:
     for(int i = 0; i < output_vars.size(); ++i) {
       printf("%s=", output_vars[i].data());
       AVar avar = env.variable_of(output_vars[i])->avars[0];
-      sol.project(avar).lb().print();
+      if(env.sort_of(avar).is_bool()) {
+        const auto& v = sol.project(avar);
+        if(v <= A::universe_type::eq_zero()) {
+          printf("false");
+        }
+        else {
+          printf("true");
+        }
+      }
+      else {
+        sol.project(avar).lb().print();
+      }
       printf(";\n");
     }
     for(int i = 0; i < output_arrays.size(); ++i) {

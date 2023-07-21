@@ -849,7 +849,7 @@ public:
       if(!bs.is(F::Seq)) { return bs; }
       FSeq negs;
       for(int i = 0; i < bs.seq().size(); ++i) {
-        negs.push_back(F::make_unary(NEG, bs.seq(i)));
+        negs.push_back(F::make_unary(NOT, bs.seq(i)));
       }
       F clause = F::make_binary(F::make_nary(OR, as.seq()), OR, F::make_nary(OR, negs));
       if(sv.size() == 4) {

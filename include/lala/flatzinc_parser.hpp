@@ -423,7 +423,7 @@ public:
         else {
           if(!ignored_annotations.contains(name)) {
             ignored_annotations.insert(name);
-            std::cerr << "Annotation " + name + " is unknown and was ignored." << std::endl;
+            std::cerr << "%Annotation " + name + " is unknown and was ignored." << std::endl;
           }
         }
       }
@@ -512,7 +512,7 @@ public:
       else if(name == "bool_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       else if(name == "bool_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
       else if(name == "bool_and") { return make_binary_fun_eq(AND, sv, EQUIV); }
-      else if(name == "bool_not") { return make_binary(NOT, sv); }
+      else if(name == "bool_not") { return make_binary(XOR, sv); }
       else if(name == "bool_or") { return make_binary_fun_eq(OR, sv, EQUIV); }
       else if(name == "bool_xor") {
         if(sv.size() == 3) { return make_binary(XOR, sv); }

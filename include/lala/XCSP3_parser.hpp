@@ -14,6 +14,8 @@
 #include "lala/logic/ast.hpp"
 #include "battery/shared_ptr.hpp"
 
+#include "flatzinc_parser.hpp"
+
 namespace XCSP3Core {
   template <class Allocator>
   class XCSP3_turbo_callbacks;
@@ -22,15 +24,27 @@ namespace XCSP3Core {
 namespace lala {
  template<class Allocator>
   void parse_xcsp3(const std::string& filename, XCSP3Core::XCSP3_turbo_callbacks<Allocator> &cb) {
-    XCSP3Core::XCSP3CoreParser parser(&cb);
+    ::XCSP3Core::XCSP3CoreParser parser(&cb);
     parser.parse(filename.c_str());
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename) {
-    XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb;
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, FlatZincOutput<Allocator>& output) {
+    ::XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb(output);
     parse_xcsp3(filename, cb);
     return cb.build_formula();
+  }
+
+  template<class Allocator>
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3_str(const std::string& input, const Allocator& allocator = Allocator()) {
+    FlatZincOutput<Allocator> output(allocator);
+    return parse_xcsp3_str(input, output);
+  }
+
+  template<class Allocator>
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, const Allocator& allocator = Allocator()) {
+    FlatZincOutput<Allocator> output(allocator);
+    return parse_xcsp3(filename, output);
   }
 }
 
@@ -56,7 +70,8 @@ namespace XCSP3Core {
         using XCSP3CoreCallbacks::buildObjectiveMinimize;
         using XCSP3CoreCallbacks::buildObjectiveMaximize;
 
-        XCSP3_turbo_callbacks(): XCSP3CoreCallbacks(), canonize(true) {}
+        XCSP3_turbo_callbacks(::lala::FlatZincOutput<Allocator>& output):
+          XCSP3CoreCallbacks(), canonize(true), output(output) {}
 
         virtual void beginInstance(InstanceType type) override;
         virtual void endInstance() override;
@@ -162,14 +177,13 @@ namespace XCSP3Core {
 
         bool canonize;
         bool debug = false;
+        ::lala::FlatZincOutput<Allocator>& output;
 
         using F = lala::TFormula<Allocator>;
 
       private:
         std::vector<F> variables;
         std::vector<F> constraints;
-        std::optional<lala::LVar<Allocator>> minimize;
-        std::optional<lala::LVar<Allocator>> maximize;
 
         F make_formula(Node* node);
 
@@ -215,7 +229,6 @@ void displayList(vector<T> &list, string separator = " ") {
         cout << list[i] << separator;
     cout << endl;
 }
-
 
 void displayList(vector<XVariable *> &list, string separator = " ") {
     if(list.size() > 8) {
@@ -363,8 +376,8 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, int minVa
   if(debug) {
     cout << "    var " << id << " : " << minValue << "..." << maxValue << endl;
   }
-
   lala::LVar<Allocator> lvar(id.c_str());
+  output.add_var(id.c_str());
   variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::LEQ, F::make_z(maxValue)));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::GEQ, F::make_z(minValue)));
@@ -578,7 +591,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintRegular(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, vector<XTransition> &transitions
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintMDD(string, vector<XVariable *> &list, vector<XTransition> &transitions) {
@@ -596,7 +608,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintMDD(string, vector<XVariab
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferent(string id, vector<XVariable *> &list) {
   if(debug) {
@@ -606,7 +617,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferent(string id, ve
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferentExcept(string id, vector<XVariable *> &list, vector<int> &except) {
@@ -619,7 +629,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferentExcept(string 
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferent(string id, vector<Tree *> &list) {
@@ -647,7 +656,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferentList(string id
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferentMatrix(string id, vector<vector<XVariable *>> &matrix) {
   if(debug) {
@@ -660,7 +668,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferentMatrix(string 
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintAllEqual(string id, vector<XVariable *> &list) {
   if(debug) {
@@ -671,7 +678,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAllEqual(string id, vector
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintNotAllEqual(string id, vector<XVariable *> &list) {
   if(debug) {
@@ -681,7 +687,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNotAllEqual(string id, vec
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, OrderType order
 template<class Allocator>
@@ -736,7 +741,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintLex(string, vector<vector<
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<vector<XVariable *>> &matrix, OrderType order
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintLexMatrix(string, vector<vector<XVariable *>> &matrix, OrderType order) {
@@ -756,7 +760,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintLexMatrix(string, vector<v
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &coeffs, XCondition &cond
 template<class Allocator>
@@ -778,7 +781,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, XCondition &cond
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariable *> &list, XCondition &cond) {
@@ -790,7 +792,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<XVariable *> &coeffs, XCondition &cond
 template<class Allocator>
@@ -811,7 +812,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string id, vector<Tree *> &list, vector<int> &coeffs, XCondition &cond) {
@@ -860,7 +860,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string id, vector<Tree
 }
 
 
-
 // string id, vector<XVariable *> &list, int value, int k
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintAtMost(string, vector<XVariable *> &list, int value, int k) {
@@ -871,7 +870,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAtMost(string, vector<XVar
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, int value, int k
 template<class Allocator>
@@ -884,7 +882,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAtLeast(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int value, int k
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintExactlyK(string, vector<XVariable *> &list, int value, int k) {
@@ -895,7 +892,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExactlyK(string, vector<XV
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &values, int k
 template<class Allocator>
@@ -910,7 +906,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAmong(string, vector<XVari
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int value, XVariable *x
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintExactlyVariable(string, vector<XVariable *> &list, int value, XVariable *x) {
@@ -921,7 +916,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExactlyVariable(string, ve
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &values, XCondition &xc
 template<class Allocator>
@@ -938,7 +932,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCount(string, vector<XVari
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, vector<XVariable *> &values, XCondition &xc
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCount(string, vector<XVariable *> &list, vector<XVariable *> &values, XCondition &xc) {
@@ -952,7 +945,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCount(string, vector<XVari
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &except, XCondition &xc
 template<class Allocator>
@@ -968,7 +960,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNValues(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, XCondition &xc
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintNValues(string, vector<XVariable *> &list, XCondition &xc) {
@@ -980,7 +971,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNValues(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> values, vector<int> &occurs, bool closed
 template<class Allocator>
@@ -997,7 +987,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, vector<int> values, vector<XVariable *> &occurs, bool closed
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector<XVariable *> &list, vector<int> values, vector<XVariable *> &occurs, bool closed) {
@@ -1012,7 +1001,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> values, vector<XInterval> &occurs, bool closed
 template<class Allocator>
@@ -1029,7 +1017,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, vector<XVariable *> values, vector<int> &occurs, bool closed
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector<XVariable *> &list, vector<XVariable *> values, vector<int> &occurs, bool closed) {
@@ -1044,7 +1031,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<XVariable *> values, vector<XVariable *> &occurs, bool closed
 template<class Allocator>
@@ -1061,7 +1047,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, vector<XVariable *> values, vector<XInterval> &occurs, bool closed
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector<XVariable *> &list, vector<XVariable *> values, vector<XInterval> &occurs, bool closed) {
@@ -1077,7 +1062,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCardinality(string, vector
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, XCondition &xc
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintMinimum(string, vector<XVariable *> &list, XCondition &xc) {
@@ -1089,7 +1073,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintMinimum(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, XVariable *index, int startIndex, RankType rank, XCondition &xc
 template<class Allocator>
@@ -1105,7 +1088,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintMinimum(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, XCondition &xc
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintMaximum(string, vector<XVariable *> &list, XCondition &xc) {
@@ -1117,7 +1099,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintMaximum(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, XVariable *index, int startIndex, RankType rank, XCondition &xc
 template<class Allocator>
@@ -1133,7 +1114,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintMaximum(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int value
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVariable *> &list, int value) {
@@ -1146,7 +1126,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, XVariable *value
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVariable *> &list, XVariable *value) {
@@ -1158,7 +1137,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, int startIndex, XVariable *index, RankType rank, int value
 template<class Allocator>
@@ -1204,7 +1182,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string, vector<int> &list, int startIndex, XVariable *index, RankType rank, XVariable *value
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<int> &list, int startIndex, XVariable *index, RankType, XVariable *value) {
@@ -1219,7 +1196,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<int
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int startIndex
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintChannel(string, vector<XVariable *> &list, int startIndex) {
@@ -1231,7 +1207,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintChannel(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list1, int startIndex1, vector<XVariable *> &list2, int startIndex2
 template<class Allocator>
@@ -1246,7 +1221,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintChannel(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int startIndex, XVariable *value
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintChannel(string, vector<XVariable *> &list, int, XVariable *value) {
@@ -1258,7 +1232,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintChannel(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &values, vector<XInterval> &widths
 template<class Allocator>
@@ -1274,7 +1247,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintStretch(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &values, vector<XInterval> &widths, vector<vector<int>> &patterns
 template<class Allocator>
@@ -1295,7 +1267,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintStretch(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &origins, vector<int> &lengths, bool zeroIgnored
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<XVariable *> &origins, vector<int> &lengths, bool) {
@@ -1309,7 +1280,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<X
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &origins, vector<XVariable *> &lengths, bool zeroIgnored
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<XVariable *> &origins, vector<XVariable *> &lengths, bool) {
@@ -1322,7 +1292,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<X
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<vector<XVariable *>> &origins, vector<vector<int>> &lengths, bool zeroIgnored
 template<class Allocator>
@@ -1343,7 +1312,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<v
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<vector<XVariable *>> &origins, vector<vector<XVariable *>> &lengths, bool zeroIgnored
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<vector<XVariable *>> &origins, vector<vector<XVariable *>> &lengths, bool) {
@@ -1363,7 +1331,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<v
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, vector<int> &values
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintInstantiation(string, vector<XVariable *> &list, vector<int> &values) {
@@ -1376,7 +1343,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintInstantiation(string, vect
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, vector<int> &values
 template<class Allocator>
@@ -1391,7 +1357,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintClause(string, vector<XVar
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int startIndex
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCircuit(string, vector<XVariable *> &list, int startIndex) {
@@ -1403,7 +1368,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCircuit(string, vector<XVa
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 // string id, vector<XVariable *> &list, int startIndex, int size
 template<class Allocator>
@@ -1418,7 +1382,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCircuit(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 // string id, vector<XVariable *> &list, int startIndex, XVariable *size
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCircuit(string, vector<XVariable *> &list, int startIndex, XVariable *size) {
@@ -1432,7 +1395,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCircuit(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimizeExpression(string expr) {
   if(debug) {
@@ -1440,7 +1402,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimizeExpression(string e
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeExpression(string expr) {
@@ -1450,7 +1411,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeExpression(string e
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimizeVariable(XVariable *x) {
   if(debug) {
@@ -1458,7 +1418,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimizeVariable(XVariable 
   }
   constraints.push_back(F::make_unary(lala::MINIMIZE, F::make_lvar(UNTYPED, x->id.c_str())));
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeVariable(XVariable *x) {
@@ -1468,7 +1427,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeVariable(XVariable 
   constraints.push_back(F::make_unary(lala::MAXIMIZE, F::make_lvar(UNTYPED, x->id.c_str())));
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjective type, vector<XVariable *> &list, vector<int> &coefs) {
   if(debug) {
@@ -1476,7 +1434,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjectiv
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjective type, vector<XVariable *> &list, vector<int> &coefs) {
@@ -1486,7 +1443,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjectiv
   throw std::runtime_error("constraint unsupported");
 }
 
-
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjective type, vector<XVariable *> &list) {
   if(debug) {
@@ -1494,7 +1450,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjectiv
   }
   throw std::runtime_error("constraint unsupported");
 }
-
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjective type, vector<XVariable *> &list) {

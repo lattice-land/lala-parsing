@@ -3,32 +3,38 @@ cmake_minimum_required(VERSION 3.24)
 cmake_policy(SET CMP0135 NEW)
 
 project(lala-parsing
-  VERSION 1.0.0
   HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
   LANGUAGES CUDA CXX)
 option(LALA_PARSING_BUILD_EXAMPLES "LALA_PARSING_BUILD_EXAMPLES" OFF)
+option(LOCAL_DEPS "LOCAL_DEPS" OFF)
 
 # Dependencies
 
 include(FetchContent)
 
-FetchContent_Declare(
-  lala_core
-  GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
-  GIT_TAG        main
-)
+if(LOCAL_DEPS)
+  FetchContent_Declare(lala_core SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../lala-core/")
+  FetchContent_Declare(xcsp3parser SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../XCSP3-CPP-Parser/")
+  FetchContent_Declare(cpp_peglib SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../cpp-peglib/")
+else()
+  FetchContent_Declare(
+    lala_core
+    GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
+    GIT_TAG        v1.0.0
+  )
 
-FetchContent_Declare(
-    xcsp3parser
-    GIT_REPOSITORY    "https://github.com/xcsp3team/XCSP3-CPP-Parser"
-    GIT_TAG           50ee7bfa59327c31a0a66ca4072a23cd08d0b182
-)
+  FetchContent_Declare(
+      xcsp3parser
+      GIT_REPOSITORY    "https://github.com/xcsp3team/XCSP3-CPP-Parser"
+      GIT_TAG           50ee7bfa59327c31a0a66ca4072a23cd08d0b182
+  )
 
-FetchContent_Declare(
-  cpp_peglib
-  GIT_REPOSITORY "https://github.com/ptal/cpp-peglib.git"
-  GIT_TAG        5637c1f5ca616913f7e3a1d601178977505c784f
-)
+  FetchContent_Declare(
+    cpp_peglib
+    GIT_REPOSITORY "https://github.com/ptal/cpp-peglib.git"
+    GIT_TAG        5637c1f5ca616913f7e3a1d601178977505c784f
+  )
+endif()
 
 FetchContent_MakeAvailable(lala_core xcsp3parser cpp_peglib)
 
@@ -58,7 +64,7 @@ endif()
 
 find_package(Doxygen REQUIRED doxygen)
 
-set(DOXYGEN_PROJECT_NAME "Lattice land parsing library")
+set(DOXYGEN_PROJECT_NAME "Lattice Land Parsing Library")
 set(DOXYGEN_BUILTIN_STL_SUPPORT YES)
 set(DOXYGEN_CASE_SENSE_NAMES NO)
 set(DOXYGEN_CLASS_DIAGRAMS NO)

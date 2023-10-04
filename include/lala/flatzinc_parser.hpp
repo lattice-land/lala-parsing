@@ -76,22 +76,27 @@ public:
   }
 
   template <class Env, class A>
+  CUDA void print_variable(AVar avar, const Env& env, const A& sol) const {
+    if(env.sort_of(avar).is_bool()) {
+      const auto& v = sol.project(avar);
+      if(v <= A::universe_type::eq_zero()) {
+        printf("false");
+      }
+      else {
+        printf("true");
+      }
+    }
+    else {
+      sol.project(avar).lb().print();
+    }
+  }
+
+  template <class Env, class A>
   CUDA void print_solution(const Env& env, const A& sol) const {
     for(int i = 0; i < output_vars.size(); ++i) {
       printf("%s=", output_vars[i].data());
       AVar avar = env.variable_of(output_vars[i])->avars[0];
-      if(env.sort_of(avar).is_bool()) {
-        const auto& v = sol.project(avar);
-        if(v <= A::universe_type::eq_zero()) {
-          printf("false");
-        }
-        else {
-          printf("true");
-        }
-      }
-      else {
-        sol.project(avar).lb().print();
-      }
+      print_variable(avar, env, sol);
       printf(";\n");
     }
     for(int i = 0; i < output_arrays.size(); ++i) {
@@ -104,7 +109,7 @@ public:
       printf("[");
       for(int j = 0; j < array_vars.size(); ++j) {
         AVar avar = env.variable_of(array_vars[j])->avars[0];
-        sol.project(avar).lb().print();
+        print_variable(avar, env, sol);
         if(j+1 != array_vars.size()) {
           printf(",");
         }

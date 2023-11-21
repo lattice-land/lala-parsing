@@ -142,7 +142,7 @@ class FlatZincParser {
   using allocator_type = Allocator;
   using F = TFormula<allocator_type>;
   using SV = peg::SemanticValues;
-  using Set = logic_set<F, allocator_type>;
+  using Set = logic_set<F>;
   using So = Sort<allocator_type>;
   using bstring = battery::string<Allocator>;
   using FSeq = typename F::Sequence;
@@ -299,7 +299,7 @@ public:
     }
 
     F make_set_literal(const SV& sv) {
-      logic_set<F, allocator_type> set;
+      logic_set<F> set;
       for(int i = 0; i < sv.size(); ++i) {
         try {
           auto range = std::any_cast<battery::tuple<F,F>>(sv[i]);

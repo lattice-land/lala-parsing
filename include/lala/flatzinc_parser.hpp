@@ -91,11 +91,18 @@ public:
     }
   }
 
-  template <class Env, class A>
-  CUDA void print_solution(const Env& env, const A& sol) const {
+  class SimplifierIdentity {
+    template<class Alloc2>
+    CUDA const LVar<Alloc2>& representative(const LVar<Alloc2>& vname) const {
+      return vname;
+    }
+  };
+
+  template <class Env, class A, class S>
+  CUDA void print_solution(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     for(int i = 0; i < output_vars.size(); ++i) {
       printf("%s=", output_vars[i].data());
-      AVar avar = env.variable_of(output_vars[i])->avars[0];
+      AVar avar = env.variable_of(simplifier.representative(output_vars[i]))->avars[0];
       print_variable(avar, env, sol);
       printf(";\n");
     }
@@ -108,7 +115,7 @@ public:
       }
       printf("[");
       for(int j = 0; j < array_vars.size(); ++j) {
-        AVar avar = env.variable_of(array_vars[j])->avars[0];
+        AVar avar = env.variable_of(simplifier.representative(array_vars[j]))->avars[0];
         print_variable(avar, env, sol);
         if(j+1 != array_vars.size()) {
           printf(",");
@@ -118,7 +125,6 @@ public:
     }
   }
 };
-
 
   namespace impl {
     /** Unfortunately, I'm really not sure this function works in all cases due to compiler bugs with rounding modes... */

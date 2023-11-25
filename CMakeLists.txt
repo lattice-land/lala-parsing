@@ -20,7 +20,7 @@ else()
   FetchContent_Declare(
     lala_core
     GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
-    GIT_TAG        v1.0.3
+    GIT_TAG        v1.0.4
   )
 
   FetchContent_Declare(

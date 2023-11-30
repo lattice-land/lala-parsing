@@ -75,31 +75,11 @@ public:
     output_vars.push_back(var_name);
   }
 
-  template <class Alloc2, class Env, class S, class A>
-  CUDA void print_variable(const LVar<Alloc2>& vname, const Env& env, const S& simplifier, const A& sol) const {
-    if(simplifier.sort_of(vname, env).is_bool()) {
-      const auto& v = simplifier.project(vname, env, sol);
-      if(v <= A::universe_type::eq_zero()) {
-        printf("false");
-      }
-      else {
-        printf("true");
-      }
-    }
-    else {
-      simplifier.project(vname, env, sol).lb().print();
-    }
-  }
-
   class SimplifierIdentity {
-    template<class Alloc2, class Env>
-    CUDA const LVar<Alloc2>& sort_of(const LVar<Alloc2>& vname, const Env& env) const {
-      return env.variable_of(vname)->sort;
-    }
-
-    template<class Alloc2, class Env, class A>
-    CUDA const LVar<Alloc2>& project(const LVar<Alloc2>& vname, const Env& env, const A& sol) const {
-      return sol.project(env.variable_of(vname)->avars[0]);
+    template <class Alloc, class B, class Env>
+    CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
+      const auto& x = *(benv.variable_of(vname));
+      x.sort.print_value(b.project(x.avars[0]));
     }
   };
 
@@ -107,7 +87,7 @@ public:
   CUDA void print_solution(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     for(int i = 0; i < output_vars.size(); ++i) {
       printf("%s=", output_vars[i].data());
-      print_variable(output_vars[i], env, simplifier, sol);
+      simplifier.print_variable(output_vars[i], env, sol);
       printf(";\n");
     }
     for(int i = 0; i < output_arrays.size(); ++i) {
@@ -119,7 +99,7 @@ public:
       }
       printf("[");
       for(int j = 0; j < array_vars.size(); ++j) {
-        print_variable(array_vars[j], env, simplifier, sol);
+        simplifier.print_variable(array_vars[j], env, sol);
         if(j+1 != array_vars.size()) {
           printf(",");
         }

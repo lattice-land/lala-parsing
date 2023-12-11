@@ -450,8 +450,12 @@ public:
       if(sv.size() != 4) {
         return make_arity_error(sv, sig, 2, sv.size() - 2);
       }
-      auto fun = F::make_binary(f(sv[1]), sig, f(sv[2]));
-      return F::make_binary(fun, eq_kind, f(sv[3]));
+      auto left = F::make_binary(f(sv[1]), sig, f(sv[2]));
+      auto right = f(sv[3]);
+      if(eq_kind == EQUIV && right.is_true()) {
+        return left;
+      }
+      return F::make_binary(left, eq_kind, right);
     }
 
     F make_binary_fun(Sig sig, const SV &sv) {

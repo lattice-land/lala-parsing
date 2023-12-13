@@ -417,7 +417,7 @@ public:
         else {
           if(!ignored_annotations.contains(name)) {
             ignored_annotations.insert(name);
-            std::cerr << "%Annotation " + name + " is unknown and was ignored." << std::endl;
+            std::cerr << "% WARNING: Annotation " + name + " is unknown and was ignored." << std::endl;
           }
         }
       }

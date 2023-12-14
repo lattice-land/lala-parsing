@@ -40,9 +40,17 @@ public:
   {}
 
   FlatZincOutput(FlatZincOutput&&) = default;
+  FlatZincOutput<Allocator>& operator=(const FlatZincOutput<Allocator>&) = default;
+
+  template <class Alloc>
+  CUDA FlatZincOutput<Allocator>& operator=(const FlatZincOutput<Alloc>& other) {
+    output_vars = other.output_vars;
+    output_arrays = other.output_arrays;
+    return *this;
+  }
 
   template<class Alloc2>
-  CUDA FlatZincOutput(const FlatZincOutput<Alloc2>& other, const Allocator& allocator = Allocator())
+  CUDA FlatZincOutput(const FlatZincOutput<Alloc2>& other, const Allocator& allocator = Allocator{})
     : output_vars(other.output_vars, allocator)
     , output_arrays(other.output_arrays, allocator)
   {}

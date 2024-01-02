@@ -466,7 +466,7 @@ public:
       return F::make_binary(left, eq_kind, right);
     }
 
-    F make_binary_fun(Sig sig, const SV &sv) {
+    F make_binary_fun(Sig sig, const SV& sv) {
       if(sv.size() != 3) {
         return make_arity_error(sv, sig, 2, sv.size() - 1);
       }

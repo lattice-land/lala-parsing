@@ -4,3 +4,4 @@ Parsing combinatorial models into the lattice land's representation of logic for
 Supported formats:
 
 * [XCSP3](http://xcsp.org/)
+* [MiniZinc/FlatZinc](https://www.minizinc.org/)

@@ -291,7 +291,7 @@ public:
 
     F make_arity_error(const SV& sv, Sig sig, int expected, int obtained) {
       return make_error(sv, "The symbol `" + std::string(string_of_sig(sig)) +
-        "` expects `" + std::to_string(expected) + " parameters" +
+        "` expects `" + std::to_string(expected) + "` parameters" +
         ", but we got `" + std::to_string(obtained) + "` parameters.");
     }
 
@@ -473,6 +473,14 @@ public:
       return F::make_binary(f(sv[1]), sig, f(sv[2]));
     }
 
+    F make_nary_fun(Sig sig, const SV &sv) {
+      FSeq seq;
+      for(int i = 1; i < sv.size(); ++i) {
+        seq.push_back(f(sv[i]));
+      }
+      return F::make_nary(sig, std::move(seq));
+    }
+
     F make_float_in(const SV &sv) {
       return F::make_binary(
           F::make_binary(f(sv[1]), GEQ, f(sv[2])),
@@ -520,6 +528,8 @@ public:
       else if(name == "bool_and") { return make_binary_fun_eq(AND, sv, EQUIV); }
       else if(name == "bool_not") { return make_binary(XOR, sv); }
       else if(name == "bool_or") { return make_binary_fun_eq(OR, sv, EQUIV); }
+      else if(name == "nbool_and") { return make_nary_fun(AND, sv); }
+      else if(name == "nbool_or") { return make_nary_fun(OR, sv); }
       else if(name == "bool_xor") {
         if(sv.size() == 3) { return make_binary(XOR, sv); }
         else { return make_binary_fun_eq(XOR, sv, EQUIV); }

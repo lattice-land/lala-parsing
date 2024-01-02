@@ -184,6 +184,7 @@ namespace XCSP3Core {
       private:
         std::vector<F> variables;
         std::vector<F> constraints;
+        std::map<std::string, std::vector<std::vector<int>>> extensionAs;
 
         F make_formula(Node* node);
 
@@ -401,7 +402,31 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     cout << "        ";
     displayList(list);
   }
-  throw std::runtime_error("constraint unsupported (extension)");
+  if(hasStar) {
+    throw std::runtime_error("hasStar unsupported");
+  }
+  extensionAs[id] = tuples;
+  typename F::Sequence disjuncts;
+  lala::Sig sig = support ? lala::EQ : lala::NEQ;
+  for(int i = 0; i < tuples.size(); ++i) {
+    typename F::Sequence conjuncts;
+    for(int j = 0; j < tuples[i].size(); ++j) {
+      conjuncts.push_back(
+        F::make_binary(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str())), sig, F::make_z(tuples[i][j])));
+    }
+    if(conjuncts.size() == 1) {
+      disjuncts.push_back(conjuncts[0]);
+    }
+    else if(conjuncts.size() > 1) {
+      disjuncts.push_back(F::make_nary(lala::AND, std::move(conjuncts)));
+    }
+  }
+  if(disjuncts.size() == 1) {
+    constraints.push_back(disjuncts[0]);
+  }
+  else if(disjuncts.size() > 1){
+    constraints.push_back(F::make_nary(lala::OR, std::move(disjuncts)));
+  }
 }
 
 template<class Allocator>
@@ -411,16 +436,30 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, XVari
     cout << "        " <<(*variable) << " "<< (support ? "support" : "conflict") << " nb tuples: " << tuples.size() << " star: " << hasStar << endl;
     cout << endl;
   }
-  throw std::runtime_error("constraint unsupported (extension)");
+  if(hasStar) {
+    throw std::runtime_error("hasStar unsupported");
+  }
+  typename F::Sequence seq;
+  lala::Sig sig = support ? lala::EQ : lala::NEQ;
+  for(int i = 0; i < tuples.size(); ++i) {
+    seq.push_back(
+      F::make_binary(F::make_lvar(UNTYPED, lala::LVar<Allocator>(variable->id.c_str())), sig, F::make_z(tuples[i])));
+  }
+  if(seq.size() == 1) {
+    constraints.push_back(seq[0]);
+  }
+  else if(seq.size() > 1){
+    constraints.push_back(F::make_nary(lala::OR, std::move(seq)));
+  }
 }
 
 // string id, vector<XVariable *> list, bool support, bool hasStar
 template<class Allocator>
-void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtensionAs(string id, vector<XVariable *>, bool, bool) {
+void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtensionAs(string id, vector<XVariable *> list, bool support, bool hasStar) {
   if(debug) {
     cout << "\n    extension constraint similar as previous one: " << id << endl;
   }
-  throw std::runtime_error("constraint unsupported (extensionAs)");
+  buildConstraintExtension(id, list, extensionAs[id], support, hasStar);
 }
 
 template<class Allocator>
@@ -615,7 +654,16 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferent(string id, ve
     cout << "        ";
     displayList(list);
   }
-  throw std::runtime_error("constraint unsupported");
+
+  for(int i = 0; i < list.size() - 1; ++i) {
+    for(int j = i+1; j < list.size(); ++j) {
+      constraints.push_back(F::make_binary(
+        F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())),
+        lala::NEQ,
+        F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str()))
+      ));
+    }
+  }
 }
 
 template<class Allocator>

@@ -411,9 +411,11 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
   for(int i = 0; i < tuples.size(); ++i) {
     typename F::Sequence conjuncts;
     for(int j = 0; j < tuples[i].size(); ++j) {
+      cout << tuples[i][j] << " ";
       conjuncts.push_back(
         F::make_binary(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str())), sig, F::make_z(tuples[i][j])));
     }
+    cout << "\n";
     if(conjuncts.size() == 1) {
       disjuncts.push_back(conjuncts[0]);
     }

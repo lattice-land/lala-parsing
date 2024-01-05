@@ -159,7 +159,7 @@ public:
 
   battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
     peg::parser parser(R"(
-      Statements  <- (VariableDecl / VarArrayDecl / ParameterDecl / ConstraintDecl / SolveItem / Comment)+
+      Statements  <- (PredicateDecl / VariableDecl / VarArrayDecl / ParameterDecl / ConstraintDecl / SolveItem / Comment)+
 
       Literal      <- Boolean / Real / Integer / ArrayAccess / VariableLit / Set
       RangeLiteral <- SetRange / Literal
@@ -204,6 +204,8 @@ public:
       Parameter <- LiteralInExpression / FunctionCall / LiteralArray
       PredicateCall <- Identifier '(' Parameter (',' Parameter)* ')'
 
+      PredicateDecl <- 'predicate' Identifier '(' (!')' .)* ')' ';'
+
       MinimizeItem <- 'minimize' RangeLiteral
       MaximizeItem <- 'maximize' RangeLiteral
       SatisfyItem <- 'satisfy'
@@ -237,6 +239,7 @@ public:
     parser["ArrayAccess"] = [this](const SV &sv) { return make_access_literal(sv); };
     parser["LiteralArray"] = [](const SV &sv) { return sv; };
     parser["ParameterDecl"] = [this] (const SV &sv) { return make_parameter_decl(sv); };
+    parser["PredicateDecl"] = [this] (const SV &sv) { return F(); };
     parser["VariableLit"] = [](const SV &sv) { return F::make_lvar(UNTYPED, LVar<Allocator>(std::any_cast<std::string>(sv[0]))); };
     parser["IntType"] = [](const SV &sv) { return So(So::Int); };
     parser["RealType"] = [](const SV &sv) { return So(So::Real); };
@@ -625,6 +628,12 @@ public:
       else if(name == "bool_clause" || name == "bool_clause_reif") {
         return make_boolean_clause(name, sv);
       }
+      else if(name == "turbo_fzn_table_bool" || name == "turbo_fzn_table_int" || name == "turbo_fzn_table_set_of_int") {
+        return make_table_constraint(name, sv);
+      }
+      else if(name == "turbo_fzn_compressed_table_int") {
+        return make_table_constraint(name, sv, true);
+      }
       return make_error(sv, "Unknown predicate `" + name + "`");
     }
 
@@ -874,6 +883,45 @@ public:
       else {
         return std::move(clause);
       }
+    }
+
+    F make_table_constraint(const std::string& name, const SV& sv, bool compressed = false) {
+      if(sv.size() != 3) {
+        return make_error(sv, "`" + name + "` expects 2 parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
+      }
+      auto header = resolve_array(sv, sv[1]);
+      if(!header.is(F::Seq)) { return header; }
+      auto table = resolve_array(sv, sv[2]);
+      if(!table.is(F::Seq)) { return table; }
+      if(table.seq().size() % header.seq().size() != 0) {
+        return make_error(sv, "`" + name + "` expects the number of variables is equal to the number of columns of the table.");
+      }
+      size_t num_cols = header.seq().size();
+      size_t num_rows = table.seq().size() / header.seq().size();
+      FSeq disjuncts;
+      for(int i = 0; i < num_rows; ++i) {
+        FSeq conjuncts;
+        for(int j = 0; j < num_cols; ++j) {
+          if(compressed) {
+            if(!table.seq(i*num_cols + j).is(F::S)) {
+              return make_error(sv, "`" + name + "` expects each cell to be a set.");
+            }
+            if(table.seq(i*num_cols + j).s().size() > 0) {
+              conjuncts.push_back(F::make_binary(header.seq(j), IN, table.seq(i*num_cols + j)));
+            }
+          }
+          else {
+            conjuncts.push_back(F::make_binary(header.seq(j), EQ, table.seq(i*num_cols + j)));
+          }
+        }
+        if(conjuncts.size() == 1) {
+          disjuncts.push_back(std::move(conjuncts[0]));
+        }
+        else if(conjuncts.size() > 1) {
+          disjuncts.push_back(F::make_nary(AND, std::move(conjuncts)));
+        }
+      }
+      return F::make_nary(OR, std::move(disjuncts));
     }
 
     F make_solve_item(const SV& sv) {

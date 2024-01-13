@@ -154,6 +154,13 @@ class FlatZincParser {
   // It is used to avoid printing an error message more than once per annotation.
   std::set<std::string> ignored_annotations;
 
+  enum class TableKind {
+    PLAIN,
+    SHORT,
+    COMPRESSED,
+    BASIC
+  };
+
 public:
   FlatZincParser(FlatZincOutput<Allocator>& output): error(false), silent(false), output(output) {}
 
@@ -628,11 +635,17 @@ public:
       else if(name == "bool_clause" || name == "bool_clause_reif") {
         return make_boolean_clause(name, sv);
       }
-      else if(name == "turbo_fzn_table_bool" || name == "turbo_fzn_table_int" || name == "turbo_fzn_table_set_of_int") {
-        return make_table_constraint(name, sv);
+      else if(name == "turbo_fzn_table_bool" || name == "turbo_fzn_table_int") {
+        return make_table_constraint(name, sv, TableKind::PLAIN);
+      }
+      else if(name == "turbo_fzn_short_table_int" || name == "turbo_fzn_short_table_set_of_int") {
+        return make_table_constraint(name, sv, TableKind::SHORT);
+      }
+      else if(name == "turbo_fzn_basic_table_int" || name == "turbo_fzn_basic_table_set_of_int") {
+        return make_table_constraint(name, sv, TableKind::BASIC);
       }
       else if(name == "turbo_fzn_compressed_table_int") {
-        return make_table_constraint(name, sv, true);
+        return make_table_constraint(name, sv, TableKind::COMPRESSED);
       }
       return make_error(sv, "Unknown predicate `" + name + "`");
     }
@@ -780,6 +793,30 @@ public:
       return F::make_nary(AND, std::move(seq));
     }
 
+    F resolve_bool(const SV& sv, const std::any& any) {
+      try {
+        auto boolParam = f(any);
+        if(boolParam.is(F::LV)) {
+          std::string paramName(boolParam.lv().data());
+          if(params.contains(paramName)) {
+            boolParam = params[paramName];
+          }
+          else {
+            return make_error(sv, "Undeclared parameter `" + paramName + "`.");
+          }
+        }
+        if(boolParam.is(F::B)) {
+          return boolParam;
+        }
+        else {
+          return make_error(sv, "Expects a Boolean parameter.");
+        }
+      }
+      catch(std::bad_any_cast) {
+        return make_error(sv, "Expects a Boolean parameter.");
+      }
+    }
+
     // We return the elements inside the array in the form `arr[1] /\ arr[2] /\ ... /\ arr[N]`.
     // The array can either be a literal array directly, or the name of an array.
     F resolve_array(const SV& sv, const std::any& any) {
@@ -885,43 +922,133 @@ public:
       }
     }
 
-    F make_table_constraint(const std::string& name, const SV& sv, bool compressed = false) {
-      if(sv.size() != 3) {
+    /** Given a cell `f` in the context of a table constraint, and `sort` the type of the variable.
+     * If `f` represents the values taken by an integer variable, then 2147483647 and {} are the wildcards.
+     * If `f` represents the values taken by a set of integer variable, then {2147483647} is the wildcard.
+     */
+    bool is_wildcard(const F& f, So sort) {
+      if(sort.is_int()) {
+        return (f.is(F::Z) && f.z() == 2147483647)
+            || (f.is(F::S) && f.s().size() == 0);
+      }
+      else if(sort.is_set() && f.is(F::S) && f.s().size() == 1) {
+        auto l = battery::get<0>(f.s()[0]);
+        auto u = battery::get<1>(f.s()[0]);
+        return l.is(F::Z) && u.is(F::Z) && l.z() == 2147483647 && u.z() == 2147483647;
+      }
+      return false;
+    }
+
+    So sort_of_table_constraint(const std::string& name) {
+      if(name == "turbo_fzn_table_bool") { return So(So::Bool); }
+      else if(name == "turbo_fzn_table_int") { return So(So::Int); }
+      else if(name == "turbo_fzn_short_table_int") { return So(So::Int); }
+      else if(name == "turbo_fzn_short_table_set_of_int") { return So(So::Set, So(So::Int)); }
+      else if(name == "turbo_fzn_basic_table_int") { return So(So::Int); }
+      else if(name == "turbo_fzn_basic_table_set_of_int") { return So(So::Set, So(So::Int)); }
+      else if(name == "turbo_fzn_compressed_table_int") { return So(So::Int); }
+      else { printf("missing table constraint."); assert(false); return So(So::Bool); }
+    }
+
+    F make_table_constraint(const std::string& name, const SV& sv, TableKind kind) {
+      bool positive = true;
+      int header_idx = 1;
+      int table_idx = 2;
+      if(sv.size() != 3 && (name == "turbo_fzn_table_bool" || name == "turbo_fzn_table_bool")) {
         return make_error(sv, "`" + name + "` expects 2 parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
       }
-      auto header = resolve_array(sv, sv[1]);
+      else {
+        if(sv.size() != 4) {
+          return make_error(sv, "`" + name + "` expects 3 parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
+        }
+        auto boolParam = resolve_bool(sv, sv[1]);
+        if(!boolParam.is(F::B)) { return boolParam; }
+        positive = boolParam.b();
+        ++header_idx;
+        ++table_idx;
+      }
+      auto header = resolve_array(sv, sv[header_idx]);
       if(!header.is(F::Seq)) { return header; }
-      auto table = resolve_array(sv, sv[2]);
+      auto table = resolve_array(sv, sv[table_idx]);
       if(!table.is(F::Seq)) { return table; }
-      if(table.seq().size() % header.seq().size() != 0) {
-        return make_error(sv, "`" + name + "` expects the number of variables is equal to the number of columns of the table.");
+      size_t num_t_cols = (kind == TableKind::BASIC) ? header.seq().size() * 2 : header.seq().size();
+      if(table.seq().size() % num_t_cols != 0) {
+        return make_error(sv, "`" + name + "` expects the number of variables is equal to the number of columns of the table (or twice for basic tables).");
       }
       size_t num_cols = header.seq().size();
       size_t num_rows = table.seq().size() / header.seq().size();
+      So sort = sort_of_table_constraint(name);
       FSeq disjuncts;
       for(int i = 0; i < num_rows; ++i) {
         FSeq conjuncts;
-        for(int j = 0; j < num_cols; ++j) {
-          if(compressed) {
-            if(!table.seq(i*num_cols + j).is(F::S)) {
-              return make_error(sv, "`" + name + "` expects each cell to be a set.");
+        for(int z = 0; z < num_cols; ++z) {
+          int j = z * (kind == TableKind::BASIC ? 2 : 1);
+          auto cell = table.seq(i*num_t_cols + j);
+          auto var = header.seq(z);
+          switch(kind) {
+            case TableKind::SHORT: {
+              if(is_wildcard(cell, sort)) { continue; }
             }
-            if(table.seq(i*num_cols + j).s().size() > 0) {
-              conjuncts.push_back(F::make_binary(header.seq(j), IN, table.seq(i*num_cols + j)));
+            case TableKind::PLAIN: { // x[j] == t[i][j]
+              if(!cell.is(F::S) && !cell.is(F::Z) && !cell.is(F::B)) {
+                return make_error(sv, "`" + name + "` expects each cell to be an integer, a set or a Boolean.");
+              }
+              conjuncts.push_back(F::make_binary(var, EQ, cell));
+              break;
             }
-          }
-          else {
-            conjuncts.push_back(F::make_binary(header.seq(j), EQ, table.seq(i*num_cols + j)));
+            case TableKind::COMPRESSED: {
+              if(!cell.is(F::S)) {
+                return make_error(sv, "`" + name + "` expects each cell to be a set.");
+              }
+              if(is_wildcard(cell, sort)) { continue; }
+              conjuncts.push_back(F::make_binary(var, IN, cell));
+              break;
+            }
+            case TableKind::BASIC: {
+              auto l = cell;
+              auto u = table.seq(i*num_t_cols + j + 1);
+              if(!l.is(F::S) && !l.is(F::Z) && !u.is(F::S) && !u.is(F::Z)) {
+                return make_error(sv, "`" + name + "` expects each cell to be an integer or a set.");
+              }
+              if(!is_wildcard(l, sort)) {
+                if(l.is(F::Z)) {
+                  conjuncts.push_back(F::make_binary(var, GEQ, l));
+                }
+                else {
+                  conjuncts.push_back(F::make_binary(var, SUPSETEQ, l));
+                }
+              }
+              if(!is_wildcard(u, sort)) {
+                if(u.is(F::Z)) {
+                  conjuncts.push_back(F::make_binary(var, LEQ, u));
+                }
+                else {
+                  conjuncts.push_back(F::make_binary(var, SUBSETEQ, u));
+                }
+              }
+              break;
+            }
           }
         }
-        if(conjuncts.size() == 1) {
+        if(conjuncts.size() == 0) {
+          return F::make_true();
+        }
+        else if(conjuncts.size() == 1) {
           disjuncts.push_back(std::move(conjuncts[0]));
         }
-        else if(conjuncts.size() > 1) {
+        else {
           disjuncts.push_back(F::make_nary(AND, std::move(conjuncts)));
         }
       }
-      return F::make_nary(OR, std::move(disjuncts));
+      if(disjuncts.size() == 0) {
+        return F::make_false();
+      }
+      else if(disjuncts.size() == 1) {
+        return std::move(disjuncts[0]);
+      }
+      else {
+        return F::make_nary(OR, std::move(disjuncts));
+      }
     }
 
     F make_solve_item(const SV& sv) {

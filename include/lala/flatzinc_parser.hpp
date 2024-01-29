@@ -635,16 +635,16 @@ public:
       if (name == "bool_clause" || name == "bool_clause_reif") {
         return make_boolean_clause(name, sv);
       }
-      if(name == "turbo_fzn_table_bool" || name == "turbo_fzn_table_int") {
+      else if(name == "turbo_fzn_table_bool" || name == "turbo_fzn_table_int") {
         return make_table_constraint(name, sv, TableKind::PLAIN);
       }
-      if(name == "turbo_fzn_short_table_int" || name == "turbo_fzn_short_table_set_of_int") {
+      else if(name == "turbo_fzn_short_table_int" || name == "turbo_fzn_short_table_set_of_int") {
         return make_table_constraint(name, sv, TableKind::SHORT);
       }
-      if(name == "turbo_fzn_basic_table_int" || name == "turbo_fzn_basic_table_set_of_int") {
+      else if(name == "turbo_fzn_basic_table_int" || name == "turbo_fzn_basic_table_set_of_int") {
         return make_table_constraint(name, sv, TableKind::BASIC);
       }
-      if(name == "turbo_fzn_compressed_table_int") {
+      else if(name == "turbo_fzn_compressed_table_int") {
         return make_table_constraint(name, sv, TableKind::COMPRESSED);
       }
       return make_error(sv, "Unknown predicate `" + name + "`");

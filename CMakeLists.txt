@@ -65,9 +65,10 @@ add_library(lala_parsing INTERFACE)
 target_include_directories(lala_parsing INTERFACE include ${LIBXML2_INCLUDE_DIR})
 target_link_libraries(lala_parsing INTERFACE lala_core ${XCSP3PARSER} cpp_peglib)
 target_compile_options(lala_parsing INTERFACE
-    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/Zc:__cplusplus /utf-8>
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/Zc:__cplusplus /utf-8 /fp:strict>
     "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>,$<CXX_COMPILER_ID:MSVC>>:SHELL:--compiler-options /Zc:__cplusplus>"
     "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>,$<CXX_COMPILER_ID:MSVC>>:SHELL:--compiler-options /utf-8>"
+    "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>,$<CXX_COMPILER_ID:MSVC>>:SHELL:--compiler-options /fp:strict>"
 )
 
 target_compile_options(lala_parsing INTERFACE

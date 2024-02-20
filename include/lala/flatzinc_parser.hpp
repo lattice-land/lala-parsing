@@ -103,7 +103,7 @@ public:
       const auto& array_vars = battery::get<2>(output_arrays[i]);
       printf("%s=array%" PRIu64 "d(", battery::get<0>(output_arrays[i]).data(), dims.size());
       for(int j = 0; j < dims.size(); ++j) {
-        printf("%d..%d,", battery::get<0>(dims[j]), battery::get<1>(dims[j]));
+        printf("%" PRIu64 "..%" PRIu64 ",", battery::get<0>(dims[j]), battery::get<1>(dims[j]));
       }
       printf("[");
       for(int j = 0; j < array_vars.size(); ++j) {

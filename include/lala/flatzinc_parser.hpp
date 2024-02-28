@@ -537,7 +537,10 @@ public:
       if (name == "bool_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       if (name == "bool_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
       if (name == "bool_and") { return make_binary_fun_eq(AND, sv, EQUIV); }
-      if (name == "bool_not") { return make_binary(XOR, sv); }
+      if (name == "bool_not") {
+        if(sv.size() == 3) { return make_binary(XOR, sv); }
+        else { return make_unary_fun(NOT, sv); }
+      }
       if (name == "bool_or") { return make_binary_fun_eq(OR, sv, EQUIV); }
       if (name == "nbool_and") { return make_nary_fun(AND, sv); }
       if (name == "nbool_or") { return make_nary_fun(OR, sv); }

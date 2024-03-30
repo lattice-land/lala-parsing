@@ -63,6 +63,10 @@ namespace XCSP3Core {
 
     template <class Allocator>
     class XCSP3_turbo_callbacks : public XCSP3CoreCallbacks {
+      using allocator_type = Allocator;
+      using F = lala::TFormula<allocator_type>;
+      using FSeq = typename F::Sequence;
+
     public:
         using XCSP3CoreCallbacks::buildConstraintMinimum;
         using XCSP3CoreCallbacks::buildConstraintMaximum;
@@ -95,7 +99,10 @@ namespace XCSP3Core {
         virtual void buildVariableInteger(string id, vector<int> &values) override;
         virtual void buildConstraintExtension(string id, vector<XVariable *> list, vector<vector<int>> &tuples, bool support, bool hasStar) override;
         virtual void buildConstraintExtension(string id, XVariable *variable, vector<int> &tuples, bool support, bool hasStar) override;
-        virtual void buildConstraintExtensionAs(string id, vector<XVariable *> list, bool support, bool hasStar) override;
+
+
+
+      virtual void buildConstraintExtensionAs(string id, vector<XVariable *> list, bool support, bool hasStar) override;
         virtual void buildConstraintIntension(string id, string expr) override;
         virtual void buildConstraintIntension(string id, Tree *tree) override;
         virtual void buildConstraintPrimitive(string id, OrderType op, XVariable *x, int k, XVariable *y) override;
@@ -114,6 +121,9 @@ namespace XCSP3Core {
         virtual void buildConstraintOrdered(string id, vector<XVariable *> &list, vector<int> &lengths, OrderType order) override;
         virtual void buildConstraintLex(string id, vector<vector<XVariable *>> &lists, OrderType order) override;
         virtual void buildConstraintLexMatrix(string id, vector<vector<XVariable *>> &matrix, OrderType order) override;
+
+
+
         virtual void buildConstraintSum(string id, vector<XVariable *> &list, vector<int> &coeffs, XCondition &cond) override;
         virtual void buildConstraintSum(string id, vector<XVariable *> &list, XCondition &cond) override;
         virtual void buildConstraintSum(string id, vector<XVariable *> &list, vector<XVariable *> &coeffs, XCondition &cond) override;
@@ -145,8 +155,12 @@ namespace XCSP3Core {
         virtual void buildConstraintMaximum(string id, vector<XVariable *> &list, XCondition &xc) override;
         virtual void buildConstraintMaximum(string id, vector<XVariable *> &list, XVariable *index, int startIndex, RankType rank,
                                             XCondition &xc) override;
-        virtual void buildConstraintElement(string id, vector<XVariable *> &list, int value) override;
+
+
+
+      virtual void buildConstraintElement(string id, vector<XVariable *> &list, int value) override;
         virtual void buildConstraintElement(string id, vector<XVariable *> &list, XVariable *value) override;
+        virtual void buildConstraintElement(string id, vector<XVariable *> &list, XVariable *index, int startIndex, XCondition &xc) override;
         virtual void buildConstraintElement(string id, vector<XVariable *> &list, int startIndex, XVariable *index, RankType rank, int value) override;
         virtual void buildConstraintElement(string id, vector<XVariable *> &list, int startIndex, XVariable *index, RankType rank, XVariable *value) override;
         virtual void buildConstraintElement(string id, vector<int> &list, int startIndex, XVariable *index, RankType rank, XVariable *value) override;
@@ -179,14 +193,21 @@ namespace XCSP3Core {
         bool debug = false;
         ::lala::FlatZincOutput<Allocator>& output;
 
-        using F = lala::TFormula<Allocator>;
+
 
       private:
         std::vector<F> variables;
         std::vector<F> constraints;
         std::map<std::string, std::vector<std::vector<int>>> extensionAs;
+        unsigned int indexAux=0;
 
         F make_formula(Node* node);
+        lala::Sig to_lala_operator(OrderType operand);
+        F to_lala_formula(const XCondition & cond);
+        F to_lala_logical_variable(XVariable *&variable);
+        F to_lala_logical_variable(const string &variable);
+        lala::LVar<Allocator> buildAuxVariableInteger(size_t maxValue);
+
 
       public:
 
@@ -395,41 +416,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, vector<in
 }
 
 template<class Allocator>
-void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vector<XVariable *> list, vector<vector<int>> &tuples, bool support, bool hasStar) {
-  if(debug) {
-    cout << "\n    extension constraint : " << id << endl;
-    cout << "        " << (support ? "support" : "conflict") << " arity: " << list.size() << " nb tuples: " << tuples.size() << " star: " << hasStar << endl;
-    cout << "        ";
-    displayList(list);
-  }
-  if(hasStar) {
-    throw std::runtime_error("hasStar unsupported");
-  }
-  extensionAs[id] = tuples;
-  typename F::Sequence disjuncts;
-  lala::Sig sig = support ? lala::EQ : lala::NEQ;
-  for(int i = 0; i < tuples.size(); ++i) {
-    typename F::Sequence conjuncts;
-    for(int j = 0; j < tuples[i].size(); ++j) {
-      conjuncts.push_back(
-        F::make_binary(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str())), sig, F::make_z(tuples[i][j])));
-    }
-    if(conjuncts.size() == 1) {
-      disjuncts.push_back(conjuncts[0]);
-    }
-    else if(conjuncts.size() > 1) {
-      disjuncts.push_back(F::make_nary(lala::AND, std::move(conjuncts)));
-    }
-  }
-  if(disjuncts.size() == 1) {
-    constraints.push_back(disjuncts[0]);
-  }
-  else if(disjuncts.size() > 1){
-    constraints.push_back(F::make_nary(lala::OR, std::move(disjuncts)));
-  }
-}
-
-template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, XVariable *variable, vector<int> &tuples, bool support, bool hasStar) {
   if(debug) {
     cout << "\n    extension constraint with one variable: " << id << endl;
@@ -451,6 +437,39 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, XVari
   else if(seq.size() > 1){
     constraints.push_back(F::make_nary(lala::OR, std::move(seq)));
   }
+}
+
+
+template<class Allocator>
+void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vector<XVariable *> list, vector<vector<int>> &tuples, bool support, bool hasStar) {
+  if(debug) {
+    cout << "\n    extension constraint : " << id << endl;
+    cout << "        " << (support ? "support" : "conflict") << " arity: " << list.size() << " nb tuples: " << tuples.size() << " star: " << hasStar << endl;
+    cout << "        ";
+    displayList(list);
+  }
+  size_t rowSize = tuples[0].size();
+  std::vector<std::vector<int>> result(rowSize, std::vector<int>(tuples.size()));
+  for (size_t i = 0; i < tuples.size(); ++i) {
+    for (size_t j = 0; j < rowSize; ++j) {
+      result[j][i] = tuples[i][j];
+    }
+  }
+
+  auto indexAuxVar= buildAuxVariableInteger(rowSize);
+  FSeq global;
+  for(int indexValue=0;indexValue<rowSize;indexValue++) {
+    for(int indexVar=0;indexVar<rowSize;indexVar++) {
+      global.push_back(F::make_binary(
+          F::make_binary(std::any_cast<XCSP3_turbo_callbacks<Allocator>::F>(indexAuxVar), lala::EQ,  F::make_z(indexValue)),
+          lala::IMPLY,
+          F::make_binary(to_lala_logical_variable(list[indexVar]), lala::EQ,  F::make_z(result[indexVar][indexValue])))
+        );
+    }
+  }
+
+  constraints.push_back(F::make_nary(lala::AND,global));
+
 }
 
 // string id, vector<XVariable *> list, bool support, bool hasStar
@@ -826,7 +845,18 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
     }
     cout << cond << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+
+  lala::Sig sig = to_lala_operator(cond.op);
+  auto right = to_lala_formula(cond);
+  FSeq seq;
+  for(int i=0;i<list.size();i++) {
+    auto var = list[i];
+    auto coeff = coeffs[i];
+    seq.push_back(F::make_binary(to_lala_logical_variable(var),lala::Sig::MUL,F::make_z(coeff)));
+  }
+  auto add = F::make_nary(lala::ADD,seq);
+  constraints.push_back(F::make_binary(std::move(add),sig,right));
+
 }
 
 // string id, vector<XVariable *> &list, XCondition &cond
@@ -838,7 +868,14 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
     displayList(list, "+");
     cout << cond << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  lala::Sig sig = to_lala_operator(cond.op);
+  auto right = to_lala_formula(cond);
+  FSeq seq;
+  for(auto var : list) {
+    seq.push_back(to_lala_logical_variable(var));
+  }
+  auto add = F::make_nary(lala::ADD,seq);
+  constraints.push_back(F::make_binary(std::move(add),sig,right));
 }
 
 // string id, vector<XVariable *> &list, vector<XVariable *> &coeffs, XCondition &cond
@@ -858,7 +895,16 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
     }
     cout << cond << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  lala::Sig sig = to_lala_operator(cond.op);
+  auto right = to_lala_formula(cond);
+  FSeq seq;
+  for(int i=0;i<list.size();i++) {
+    auto var = list[i];
+    auto coeff = coeffs[i];
+    seq.push_back(F::make_binary(to_lala_logical_variable(var),lala::Sig::MUL,to_lala_logical_variable(coeff)));
+  }
+  auto add = F::make_nary(lala::ADD,seq);
+  constraints.push_back(F::make_binary(std::move(add),sig,right));
 }
 
 template<class Allocator>
@@ -1162,6 +1208,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintMaximum(string, vector<XVa
   throw std::runtime_error("constraint unsupported");
 }
 
+
 // string id, vector<XVariable *> &list, int value
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVariable *> &list, int value) {
@@ -1171,7 +1218,13 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
     displayList(list);
     cout << "        value: " << value << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  auto v = F::make_z(value);
+  FSeq seq;
+  for(auto & variable : list) {
+    seq.push_back(F::make_binary(to_lala_logical_variable(variable), lala::EQ, v));
+  }
+  constraints.push_back(F::make_nary(lala::OR, std::move(seq)));
+
 }
 
 // string id, vector<XVariable *> &list, XVariable *value
@@ -1183,12 +1236,30 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
     displayList(list);
     cout << "        value: " << *value << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  auto v = to_lala_logical_variable(value);
+  FSeq seq;
+  for(auto & variable : list) {
+    seq.push_back(F::make_binary(to_lala_logical_variable(variable), lala::EQ,  v));
+  }
+  constraints.push_back(F::make_nary(lala::OR, std::move(seq)));
 }
+template<class Allocator>
+void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string id, vector<XVariable *> &list, XVariable *index, int startIndex, XCondition &xc) {
+  FSeq seq;
+  for(int i = 0; i < list.size(); ++i) {
+    // index = (i+1) ==> varName = value
+    seq.push_back(F::make_binary(
+      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      lala::IMPLY,
+      F::make_binary(to_lala_logical_variable(list[i]), to_lala_operator(xc.op), to_lala_formula(xc))));
+  }
+  constraints.push_back(F::make_nary(lala::AND, std::move(seq)));
+}
+
 
 // string id, vector<XVariable *> &list, int startIndex, XVariable *index, RankType rank, int value
 template<class Allocator>
-void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVariable *> &list, int startIndex, XVariable *index, RankType, int value) {
+void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string id, vector<XVariable *> &list, int startIndex, XVariable *index, RankType, int value) {
   if(debug) {
     cout << "\n    element constant (with index) constraint" << endl;
     cout << "        ";
@@ -1197,7 +1268,15 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
     cout << "        Start index : " << startIndex << endl;
     cout << "        index : " << *index << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  FSeq seq;
+  for(int i = 0; i < list.size(); ++i) {
+    // index = (i+1) ==> varName = value
+    seq.push_back(F::make_binary(
+      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      lala::IMPLY,
+      F::make_binary(to_lala_logical_variable(list[i]), lala::EQ,  F::make_z(value))));
+  }
+  constraints.push_back(F::make_nary(lala::AND, std::move(seq)));
 }
 
 template<class Allocator>
@@ -1213,7 +1292,21 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string id, vector<
     cout << "        col index : " << *colIndex << endl;
     cout << "        value     : " << *value << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+
+  FSeq seq;
+  for(int i = 0; i < matrix.size(); ++i) {
+    for(int j=0;j<matrix[i].size();j++) {
+      // index = (i+1) ==> varName = value
+      auto leftAnd = F::make_binary(to_lala_logical_variable(rowIndex), lala::EQ,  F::make_z(i));
+      auto rightAnd = F::make_binary(to_lala_logical_variable(colIndex), lala::EQ,  F::make_z(j));
+      auto andand = F::make_binary(leftAnd,lala::AND,rightAnd);
+      seq.push_back(F::make_binary(
+        andand,
+        lala::IMPLY,
+        F::make_binary(F::make_z(matrix[i][j]), lala::EQ,  to_lala_logical_variable(value))));
+    }
+  }
+  constraints.push_back(F::make_nary(lala::AND, std::move(seq)));
 }
 
 // string id, vector<XVariable *> &list, int startIndex, XVariable *index, RankType rank, XVariable *value
@@ -1227,7 +1320,15 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
     cout << "        Start index : " << startIndex << endl;
     cout << "        index : " << *index << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  FSeq seq;
+  for(int i = 0; i < list.size(); ++i) {
+    // index = (i+1) ==> varName = value
+    seq.push_back(F::make_binary(
+      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      lala::IMPLY,
+      F::make_binary(to_lala_logical_variable(list[i]), lala::EQ,  to_lala_logical_variable(value))));
+  }
+  constraints.push_back(F::make_nary(lala::AND, std::move(seq)));
 }
 
 // string, vector<int> &list, int startIndex, XVariable *index, RankType rank, XVariable *value
@@ -1241,7 +1342,15 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<int
     cout << "        Start index : " << startIndex << endl;
     cout << "        index : " << *index << endl;
   }
-  throw std::runtime_error("constraint unsupported");
+  FSeq seq;
+  for(int i = 0; i < list.size(); ++i) {
+    // index = (i+1) ==> varName = value
+    seq.push_back(F::make_binary(
+      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      lala::IMPLY,
+      F::make_binary(F::make_z(list[i]), lala::EQ,  to_lala_logical_variable(value))));
+  }
+  constraints.push_back(F::make_nary(lala::AND, std::move(seq)));
 }
 
 // string id, vector<XVariable *> &list, int startIndex
@@ -1515,5 +1624,59 @@ void XCSP3_turbo_callbacks<Allocator>::buildAnnotationDecision(vector<XVariable*
   }
   throw std::runtime_error("constraint unsupported");
 }
+
+template<class Allocator>
+ lala::Sig XCSP3_turbo_callbacks<Allocator>::to_lala_operator(OrderType op) {
+  switch (op) {
+    case LE:
+      return lala::Sig::LEQ;
+    case LT:
+      return lala::Sig::LT;
+    case GE:
+      return lala::Sig::GEQ;
+    case GT:
+      return lala::Sig::GT;
+    case IN:
+      return lala::Sig::IN;
+    case NE:
+      return lala::Sig::NEQ;
+    default:
+      throw std::runtime_error(op+" is not a supported operator type.");
+  }
+
+}
+
+template<class Allocator>
+  XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::to_lala_formula(const XCondition & cond) {
+  switch (cond.operandType) {
+    case INTEGER:
+      return F::make_z(cond.val);
+    case VARIABLE:
+       return to_lala_logical_variable(cond.var);
+    default:
+      throw std::runtime_error(cond.operandType+" is not a supported operand type.");
+  }
+}
+
+template<class Allocator>
+  XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::to_lala_logical_variable(XVariable *&variable) {
+  return F::make_lvar(UNTYPED, lala::LVar<Allocator>(variable->id.c_str()));
+}
+
+template<class Allocator>
+  XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::to_lala_logical_variable(const string &variable) {
+  return F::make_lvar(UNTYPED, lala::LVar<Allocator>(variable.c_str()));
+}
+
+template <class Allocator>
+lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(size_t maxValue) {
+  lala::LVar<Allocator> indexAuxVar("aux_"+::std::to_string(indexAux));
+  indexAux++;
+  variables.push_back(F::make_exists(UNTYPED, indexAuxVar, lala::Sort<Allocator>::Int));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, indexAuxVar), lala::LEQ, F::make_z(maxValue)));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, indexAuxVar), lala::GEQ, F::make_z(0)));
+  return indexAuxVar;
+}
+
 
 #endif // XCSP3_PARSER_HPP

@@ -544,6 +544,7 @@ public:
       if (name == "bool_or") { return make_binary_fun_eq(OR, sv, EQUIV); }
       if (name == "nbool_and") { return make_nary_fun(AND, sv); }
       if (name == "nbool_or") { return make_nary_fun(OR, sv); }
+      if (name == "nbool_equiv") { return make_nary_fun(EQUIV, sv); }
       if (name == "bool_xor") {
         if(sv.size() == 3) { return make_binary(XOR, sv); }
         else { return make_binary_fun_eq(XOR, sv, EQUIV); }

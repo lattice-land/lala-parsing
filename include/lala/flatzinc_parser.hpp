@@ -13,6 +13,7 @@
 #include <iostream>
 #include <cfenv>
 #include <set>
+#include <cinttypes>
 
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"

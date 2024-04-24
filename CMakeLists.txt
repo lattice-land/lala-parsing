@@ -46,7 +46,7 @@ else()
     FetchContent_Declare(
       xcsp3parser
       GIT_REPOSITORY    "https://github.com/xcsp3team/XCSP3-CPP-Parser"
-      GIT_TAG           ebed5a8759eecae79128dddc0e7e10f96cebe9bb
+      GIT_TAG           35ee267bd65d4757117e1b778a3679ef4517c637
     )
   endif()
 

@@ -34,7 +34,6 @@ if(LOCAL_DEPS)
   endif()
 
   FetchContent_Declare(cpp_peglib SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../cpp-peglib/")
-
 else()
   FetchContent_Declare(
     lala_core
@@ -53,7 +52,7 @@ else()
   FetchContent_Declare(
     cpp_peglib
     GIT_REPOSITORY "https://github.com/ptal/cpp-peglib.git"
-    GIT_TAG        5637c1f5ca616913f7e3a1d601178977505c784f
+    GIT_TAG        245b59446d424b499b316ee77ec59de18443de23
   )
 endif()
 

@@ -264,35 +264,6 @@ void displayList(vector<XVariable *> &list, string separator = " ") {
     cout << endl;
 }
 
-// template<class Allocator>
-// battery::vector<battery::tuple<lala::TFormula<allocator_type>,int>> findIntervals(const std::vector<int>& nums) {
-//     using allocator_type = Allocator;
-//     using F = lala::TFormula<allocator_type>;
-//     battery::vector<battery::tuple<F,F>>  intervals;
-//
-//     if (nums.empty()) {
-//         return intervals;
-//     }
-//
-//     int start = nums[0];
-//     int end = nums[0];
-//
-//     for (size_t i = 1; i < nums.size(); ++i) {
-//         if (nums[i] == end + 1) {
-//             end = nums[i];
-//         } else {
-//             auto t = battery::make_tuple(F::make_z(start),F::make_z(end));
-//             intervals.push_back(t);
-//             start = nums[i];
-//             end = nums[i];
-//         }
-//     }
-//     auto t = battery::make_tuple(F::make_z(start),F::make_z(end));
-//     intervals.push_back(t);
-//
-//     return intervals;
-// }
-
 
 
 template<class Allocator>

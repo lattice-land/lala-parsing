@@ -264,6 +264,8 @@ void displayList(vector<XVariable *> &list, string separator = " ") {
     cout << endl;
 }
 
+
+
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::beginInstance(InstanceType type) {
   if(debug) {
@@ -409,7 +411,28 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, vector<in
     cout << "        ";
     displayList(values);
   }
-  throw std::runtime_error("set variable unsupported");
+  lala::LVar<Allocator> lvar(id.c_str());
+  output.add_var(id.c_str());
+  variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
+
+
+  lala::logic_set<F> intervals;
+  int start = values[0];
+  int end = values[0];
+
+  for (size_t i = 1; i < values.size(); ++i) {
+    if (values[i] == end + 1) {
+      end = values[i];
+    } else {
+      auto t = battery::make_tuple(F::make_z(start),F::make_z(end));
+      intervals.push_back(t);
+      start = values[i];
+      end = values[i];
+    }
+  }
+  auto t = battery::make_tuple(F::make_z(start),F::make_z(end));
+  intervals.push_back(t);
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::IN, F::make_set(intervals)));
 }
 
 template<class Allocator>
@@ -1640,6 +1663,7 @@ lala::Sig XCSP3_turbo_callbacks<Allocator>::to_lala_operator(OrderType op) {
     case GT: return lala::Sig::GT;
     case IN: return lala::Sig::IN;
     case NE: return lala::Sig::NEQ;
+    case EQ: return lala::Sig::EQ;
     default:
       throw std::runtime_error(op+" is not a supported operator type.");
   }

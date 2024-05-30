@@ -83,7 +83,9 @@ public:
   void add_var(const bstring& var_name) {
     output_vars.push_back(var_name);
   }
-
+  bvector<bstring> getOutputVars(){
+    return output_vars;
+  }
   class SimplifierIdentity {
     template <class Alloc, class B, class Env>
     CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {

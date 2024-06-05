@@ -138,9 +138,13 @@ public:
     printf("v <instantiation> <list>%s</list> <values>", vars.c_str());
     for (int i = 0; i < output_vars.size(); ++i) {
       simplifier.print_variable(output_vars[i], env, sol);
+      if(i+1 != output_vars.size()) {
+        printf(" ");
+      }
     }
     printf("</values> </instantiation>\n");
   }
+
 
 
   template <class Env, class A, class S>

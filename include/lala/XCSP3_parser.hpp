@@ -1560,7 +1560,11 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vect
     FSeq sum;
     sum.push_back(rkj);
     for(int i=0;i<origins.size();i++) {
-      sum.push_back(F::make_binary(F::make_z(heights[i]),lala::MUL,vars[i*origins.size()-1+j]));
+      if(i == j) {
+        continue;
+      }
+      auto index = i*(origins.size()-1)+j;
+      sum.push_back(F::make_binary(F::make_z(heights[i]),lala::MUL,vars[index]));
     }
     auto left = F::make_nary(lala::ADD,std::move(sum));
     constraints.push_back(F::make_binary(left,to_lala_operator(xc.op),to_lala_formula(xc)));

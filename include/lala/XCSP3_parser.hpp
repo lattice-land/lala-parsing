@@ -1539,7 +1539,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<v
 // string id, vector<vector<XV
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vector<XVariable *> &origins, vector<int> &lengths, vector<int> &heights, XCondition &xc) {
-  battery::vector<lala::LVar<Allocator>> vars;
+  battery::vector<F> vars;
   for(int j=0;j<origins.size();j++) {
     for(int i=0;i<origins.size();i++) {
       if(i == j) {
@@ -1548,7 +1548,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vect
       auto left = F::make_binary(to_lala_logical_variable(origins[i]), lala::LEQ, to_lala_logical_variable(origins[j]));
       auto right = F::make_binary(to_lala_logical_variable(origins[j]), lala::LT, F::make_binary(to_lala_logical_variable(origins[i]), lala::ADD, F::make_z(lengths[i])));
       auto andand = F::make_binary(left, lala::AND, right);
-      auto bij = buildAuxVariableInteger(1);
+      auto bij = F::make_lvar(UNTYPED, buildAuxVariableInteger(1));
       vars.push_back(bij);
       auto equiv = F::make_binary(bij,lala::EQUIV,andand);
       constraints.push_back(equiv);

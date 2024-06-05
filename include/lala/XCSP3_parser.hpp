@@ -174,6 +174,7 @@ namespace XCSP3Core {
       virtual void buildConstraintNoOverlap(string id, vector<XVariable *> &origins, vector<XVariable *> &lengths, bool zeroIgnored) override;
       virtual void buildConstraintNoOverlap(string id, vector<vector<XVariable *>> &origins, vector<vector<int>> &lengths, bool zeroIgnored) override;
       virtual void buildConstraintNoOverlap(string id, vector<vector<XVariable *>> &origins, vector<vector<XVariable *>> &lengths, bool zeroIgnored) override;
+      virtual void buildConstraintCumulative(string id, vector<XVariable *> &origins, vector<int> &lengths, vector<int> &heights, XCondition &xc) override;
       virtual void buildConstraintInstantiation(string id, vector<XVariable *> &list, vector<int> &values) override;
       virtual void buildConstraintClause(string id, vector<XVariable *> &positive, vector<XVariable *> &negative) override ;
       virtual void buildConstraintCircuit(string id, vector<XVariable *> &list, int startIndex) override;
@@ -1516,6 +1517,59 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<v
   }
   throw std::runtime_error("constraint unsupported");
 }
+
+/**
+  * The callback function related to a cumulative constraint with variable origins, int lengths and int heights
+  * See http://xcsp.org/specifications/cumulative
+  *
+  * Example:
+  * <cumulative>
+  *     <origins> s1 s2 s3 s4 </origins>
+  *     <lengths> 1 2 3 4 </lengths>
+  *     <heights> 3 4 5 6 </heights>
+  *     <condition> (le,4) </condition>
+  * </cumulative>
+  *
+  * @param id the id (name) of the constraint
+  * @param origins the vector of origins
+  * @param lengths the vector of lenghts (here ints)
+  * @param heights the vector of heights (here ints)
+  * @param xc the condition (see XCondition)
+  */
+// string id, vector<vector<XV
+template<class Allocator>
+void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vector<XVariable *> &origins, vector<int> &lengths, vector<int> &heights, XCondition &xc) {
+  battery::vector<lala::LVar<Allocator>> vars;
+  for(int j=0;j<origins.size();j++) {
+    for(int i=0;i<origins.size();i++) {
+      if(i == j) {
+        continue;
+      }
+      auto left = F::make_binary(to_lala_logical_variable(origins[i]), lala::LEQ, to_lala_logical_variable(origins[j]));
+      auto right = F::make_binary(to_lala_logical_variable(origins[j]), lala::LT, F::make_binary(to_lala_logical_variable(origins[i]), lala::ADD, F::make_z(lengths[i])));
+      auto andand = F::make_binary(left, lala::AND, right);
+      auto bij = buildAuxVariableInteger(1);
+      vars.push_back(bij);
+      auto equiv = F::make_binary(bij,lala::EQUIV,andand);
+      constraints.push_back(equiv);
+    }
+  }
+
+  for(int j=0;j<origins.size();j++) {
+    auto rkj = F::make_z(heights[j]);
+    FSeq sum;
+    sum.push_back(rkj);
+    for(int i=0;i<origins.size();i++) {
+      sum.push_back(F::make_binary(F::make_z(heights[i]),lala::MUL,vars[i*origins.size()-1+j]));
+    }
+    auto left = F::make_nary(lala::ADD,std::move(sum));
+    constraints.push_back(F::make_binary(left,to_lala_operator(xc.op),to_lala_formula(xc)));
+  }
+
+}
+
+
+
 
 // string id, vector<XVariable *> &list, vector<int> &values
 template<class Allocator>

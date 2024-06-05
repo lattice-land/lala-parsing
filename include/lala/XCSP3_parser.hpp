@@ -207,6 +207,7 @@ namespace XCSP3Core {
       F to_lala_logical_variable(XVariable *&variable);
       F to_lala_logical_variable(const string &variable);
       lala::LVar<Allocator> buildAuxVariableInteger(size_t maxValue);
+      lala::LVar<Allocator> buildAuxVariableInteger();
 
       public:
         size_t num_variables() const {
@@ -1674,34 +1675,83 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeVariable(XVariable 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjective type, vector<XVariable *> &list, vector<int> &coefs) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMinimize(type, list, coefs);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
+    displayList(coefs);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("minimization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = buildAuxVariableInteger();
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_binary(F::make_lvar(UNTYPED,list[i]->id),lala::MUL,F::make_z(coefs[i])));
+  }
+
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MINIMIZE,optVariable));
 }
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjective type, vector<XVariable *> &list, vector<int> &coefs) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMaximize(type, list, coefs);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
+    displayList(coefs);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("maximization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = buildAuxVariableInteger();
+
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_binary(F::make_lvar(UNTYPED,list[i]->id),lala::MUL,F::make_z(coefs[i])));
+  }
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MAXIMIZE,optVariable));
 }
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjective type, vector<XVariable *> &list) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMinimize(type, list);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("minimization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = buildAuxVariableInteger();
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_lvar(UNTYPED,list[i]->id));
+  }
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MINIMIZE,optVariable));
 }
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjective type, vector<XVariable *> &list) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMaximize(type, list);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("maximization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = buildAuxVariableInteger();
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_lvar(UNTYPED,list[i]->id));
+  }
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MAXIMIZE,optVariable));
 }
+
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildAnnotationDecision(vector<XVariable*> &list) {
@@ -1754,6 +1804,14 @@ lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::LEQ, F::make_z(maxValue)));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::GEQ, F::make_z(0)));
+  return auxVar;
+}
+
+template <class Allocator>
+lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger() {
+  lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
+  auxiliaryVariables++;
+  variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
   return auxVar;
 }
 

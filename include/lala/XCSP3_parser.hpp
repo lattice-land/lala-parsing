@@ -1684,7 +1684,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjectiv
   }
 
   battery::vector<F> sequences;
-  auto optVariable = buildAuxVariableInteger();
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
   for(int i=0;i<list.size();i++) {
     sequences.push_back(F::make_binary(F::make_lvar(UNTYPED,list[i]->id),lala::MUL,F::make_z(coefs[i])));
   }
@@ -1705,7 +1705,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjectiv
   }
 
   battery::vector<F> sequences;
-  auto optVariable = buildAuxVariableInteger();
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
 
   for(int i=0;i<list.size();i++) {
     sequences.push_back(F::make_binary(F::make_lvar(UNTYPED,list[i]->id),lala::MUL,F::make_z(coefs[i])));
@@ -1725,7 +1725,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjectiv
   }
 
   battery::vector<F> sequences;
-  auto optVariable = buildAuxVariableInteger();
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
   for(int i=0;i<list.size();i++) {
     sequences.push_back(F::make_lvar(UNTYPED,list[i]->id));
   }
@@ -1744,7 +1744,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjectiv
   }
 
   battery::vector<F> sequences;
-  auto optVariable = buildAuxVariableInteger();
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
   for(int i=0;i<list.size();i++) {
     sequences.push_back(F::make_lvar(UNTYPED,list[i]->id));
   }

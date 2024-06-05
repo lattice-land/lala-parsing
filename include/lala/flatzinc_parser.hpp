@@ -14,111 +14,11 @@
 #include <cfenv>
 #include <set>
 #include <cinttypes>
-
+#include "output.hpp"
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
 
 namespace lala {
-
-template<class Allocator>
-class FlatZincOutput {
-  using bstring = battery::string<Allocator>;
-  template<class T> using bvector = battery::vector<T, Allocator>;
-  using array_dim_t = bvector<battery::tuple<size_t,size_t>>;
-  using F = TFormula<Allocator>;
-
-  bvector<bstring> output_vars;
-  // For each array, we store its output dimension characteristics and the list of the variables in the array.
-  bvector<battery::tuple<bstring, array_dim_t, bvector<bstring>>> output_arrays;
-
-public:
-  template <class Alloc2>
-  friend class FlatZincOutput;
-
-  CUDA FlatZincOutput(const Allocator& alloc)
-    : output_vars(alloc)
-    , output_arrays(alloc)
-  {}
-
-  FlatZincOutput(FlatZincOutput&&) = default;
-  FlatZincOutput<Allocator>& operator=(const FlatZincOutput<Allocator>&) = default;
-
-  template <class Alloc>
-  CUDA FlatZincOutput<Allocator>& operator=(const FlatZincOutput<Alloc>& other) {
-    output_vars = other.output_vars;
-    output_arrays = other.output_arrays;
-    return *this;
-  }
-
-  template<class Alloc2>
-  CUDA FlatZincOutput(const FlatZincOutput<Alloc2>& other, const Allocator& allocator = Allocator{})
-    : output_vars(other.output_vars, allocator)
-    , output_arrays(other.output_arrays, allocator)
-  {}
-
-  void add_array_var(const std::string& name, const bstring& var_name, const peg::SemanticValues& sv) {
-    int idx = -1;
-    auto array_name = bstring(name.data());
-    for(int i = 0; i < output_arrays.size(); ++i) {
-      if(battery::get<0>(output_arrays[i]) == array_name) {
-        idx = i;
-        break;
-      }
-    }
-    if(idx == -1) {
-      output_arrays.push_back(battery::make_tuple<bstring, array_dim_t, bvector<bstring>>(bstring(array_name), {}, {}));
-      idx = static_cast<int>(output_arrays.size()) - 1;
-      // Add the dimension of the array.
-      for(int i = 0; i < sv.size(); ++i) {
-        auto range = std::any_cast<F>(sv[i]);
-        for(int j = 0; j < range.s().size(); ++j) {
-          const auto& itv = range.s()[j];
-          battery::get<1>(output_arrays[idx]).push_back(battery::make_tuple(battery::get<0>(itv).z(), battery::get<1>(itv).z()));
-        }
-      }
-    }
-    battery::get<2>(output_arrays[idx]).push_back(var_name);
-  }
-
-  void add_var(const bstring& var_name) {
-    output_vars.push_back(var_name);
-  }
-  bvector<bstring> getOutputVars(){
-    return output_vars;
-  }
-  class SimplifierIdentity {
-    template <class Alloc, class B, class Env>
-    CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
-      const auto& x = *(benv.variable_of(vname));
-      x.sort.print_value(b.project(x.avars[0]));
-    }
-  };
-
-  template <class Env, class A, class S>
-  CUDA void print_solution(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
-    for(int i = 0; i < output_vars.size(); ++i) {
-      printf("%s=", output_vars[i].data());
-      simplifier.print_variable(output_vars[i], env, sol);
-      printf(";\n");
-    }
-    for(int i = 0; i < output_arrays.size(); ++i) {
-      const auto& dims = battery::get<1>(output_arrays[i]);
-      const auto& array_vars = battery::get<2>(output_arrays[i]);
-      printf("%s=array%" PRIu64 "d(", battery::get<0>(output_arrays[i]).data(), dims.size());
-      for(int j = 0; j < dims.size(); ++j) {
-        printf("%" PRIu64 "..%" PRIu64 ",", battery::get<0>(dims[j]), battery::get<1>(dims[j]));
-      }
-      printf("[");
-      for(int j = 0; j < array_vars.size(); ++j) {
-        simplifier.print_variable(array_vars[j], env, sol);
-        if(j+1 != array_vars.size()) {
-          printf(",");
-        }
-      }
-      printf("]);\n");
-    }
-  }
-};
 
 namespace impl {
 
@@ -152,7 +52,7 @@ class FlatZincParser {
   std::map<std::string, int> arrays; // Size of all named arrays (parameters and variables).
   bool error; // If an error was found during parsing.
   bool silent; // If we do not want to output error messages.
-  FlatZincOutput<Allocator>& output;
+  Output<Allocator>& output;
 
   // Contains all the annotations ignored.
   // It is used to avoid printing an error message more than once per annotation.
@@ -166,7 +66,7 @@ class FlatZincParser {
   };
 
 public:
-  FlatZincParser(FlatZincOutput<Allocator>& output): error(false), silent(false), output(output) {}
+  FlatZincParser(Output<Allocator>& output): error(false), silent(false), output(output) {}
 
   battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
     peg::parser parser(R"(
@@ -1122,13 +1022,13 @@ public:
       - Several solve items are allowed, which is useful for multi-objectives optimization.
   */
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, FlatZincOutput<Allocator>& output) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, Output<Allocator>& output) {
     impl::FlatZincParser<Allocator> parser(output);
     return parser.parse(input);
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, FlatZincOutput<Allocator>& output) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, Output<Allocator>& output) {
     std::ifstream t(filename);
     if(t.is_open()) {
       std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
@@ -1142,13 +1042,13 @@ public:
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, const Allocator& allocator = Allocator()) {
-    FlatZincOutput<Allocator> output(allocator);
+    Output<Allocator> output(allocator);
     return parse_flatzinc_str(input, output);
   }
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, const Allocator& allocator = Allocator()) {
-    FlatZincOutput<Allocator> output(allocator);
+    Output<Allocator> output(allocator);
     return parse_flatzinc(filename, output);
   }
 }

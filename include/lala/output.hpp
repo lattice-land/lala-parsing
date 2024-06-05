@@ -5,7 +5,6 @@
 #ifndef OUTPUT_H
 #define OUTPUT_H
 
-#include "string_util.hpp"
 
 namespace lala {
 
@@ -27,6 +26,17 @@ class Output {
   bvector<battery::tuple<bstring, array_dim_t, bvector<bstring>>> output_arrays;
 
   OutputType type;
+  std::string join_str(const bvector<bstring>& vec, const std::string& separator,  std::function<std::string(const bstring&)> toString) const {
+    std::string result;
+    for (size_t i = 0; i < vec.size(); ++i) {
+      result += toString(vec[i]);
+      if (i < vec.size() - 1) {
+        result += separator;
+      }
+    }
+    return result;
+  }
+
 
 public:
   template <class Alloc2>
@@ -122,16 +132,14 @@ public:
     }
   }
 
-  template <class Env, class A, class S>
+  template<class Env, class A, class S>
   CUDA void print_solution_xml(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
-    auto vars = join(output_vars, " ", [](const bstring& s) { return s.data(); });
-    auto values = join(output_vars, " ", [](const bstring& s) { return s.data(); });
-    printf("v <instantiation> <list>%s</list> <values>",vars);
-    for(int i = 0; i < output_vars.size(); ++i) {
+    auto vars = join_str(output_vars, " ", [](const bstring& s) -> std::string { return s.data(); });
+    printf("v <instantiation> <list>%s</list> <values>", vars.c_str());
+    for (int i = 0; i < output_vars.size(); ++i) {
       simplifier.print_variable(output_vars[i], env, sol);
     }
     printf("</values> </instantiation>\n");
-
   }
 
 

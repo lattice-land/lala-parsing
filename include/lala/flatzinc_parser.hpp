@@ -14,9 +14,9 @@
 #include <cfenv>
 #include <set>
 #include <cinttypes>
-#include "output.hpp"
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
+#include "output.hpp"
 
 namespace lala {
 

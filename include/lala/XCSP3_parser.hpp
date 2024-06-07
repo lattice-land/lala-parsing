@@ -15,7 +15,7 @@
 #include "battery/shared_ptr.hpp"
 
 #include "flatzinc_parser.hpp"
-#include "output.hpp"
+#include "solver_output.hpp"
 
 namespace XCSP3Core {
   template <class Allocator>
@@ -25,6 +25,7 @@ namespace XCSP3Core {
 namespace lala {
   enum class TableDecomposition {
     DISJUNCTIVE,
+    TABLE_PREDICATE,
     ELEMENTS
   };
 
@@ -487,7 +488,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
       }
     }
   }
-  else {
+  else if(table_decomposition == lala::TableDecomposition::DISJUNCTIVE) {
     FSeq disjuncts;
     for(int i = 0; i < tuples.size(); ++i) {
       FSeq conjuncts;
@@ -511,6 +512,25 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     else if(disjuncts.size() > 1){
       constraints.push_back(F::make_nary(lala::OR, std::move(disjuncts)));
     }
+  }
+  else if(table_decomposition==lala::TableDecomposition::TABLE_PREDICATE) {
+    FSeq t_seq;
+    t_seq.push_back(F::make_z(tuples.size()));
+    t_seq.push_back(F::make_z(list.size()));
+    for(int i = 0; i < tuples.size(); ++i) {
+      for(int j = 0; j < tuples[i].size(); ++j) {
+        if(hasStar && tuples[i][j] == INT_MAX) {
+          t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>("*")));
+        }
+        else {
+          t_seq.push_back(F::make_z(tuples[i][j]));
+        }
+      }
+    }
+    for(int i = 0; i < list.size(); ++i) {
+      t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())));
+    }
+    constraints.push_back(F::make_nary("tables", std::move(t_seq)));
   }
 }
 

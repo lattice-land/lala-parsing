@@ -420,7 +420,7 @@ public:
         auto annot = std::any_cast<SV>(annots[i]);
         auto name = std::any_cast<std::string>(annot[0]);
         if(name == "abstract") {
-          AType ty = f(annot[1]).z(); // assignment of logic_int (int64_t) to ty (int) truncates ty (bug?)
+          AType ty = f(annot[1]).z();
           formula.type_as(ty);
         }
         else if(name == "is_defined_var") {}

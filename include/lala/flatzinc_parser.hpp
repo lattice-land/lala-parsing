@@ -16,7 +16,7 @@
 #include <cinttypes>
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
-#include "output.hpp"
+#include "solver_output.hpp"
 
 namespace lala {
 

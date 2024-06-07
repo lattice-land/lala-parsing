@@ -15,6 +15,7 @@
 #include "battery/shared_ptr.hpp"
 
 #include "flatzinc_parser.hpp"
+#include "solver_output.hpp"
 
 namespace XCSP3Core {
   template <class Allocator>
@@ -24,6 +25,7 @@ namespace XCSP3Core {
 namespace lala {
   enum class TableDecomposition {
     DISJUNCTIVE,
+    TABLE_PREDICATE,
     ELEMENTS
   };
 
@@ -35,7 +37,7 @@ namespace lala {
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, FlatZincOutput<Allocator>& output, TableDecomposition d = TableDecomposition::ELEMENTS) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, SolverOutput<Allocator>& output, TableDecomposition d = TableDecomposition::ELEMENTS) {
     ::XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb(output, d);
     parse_xcsp3(filename, cb);
     return cb.build_formula();
@@ -43,13 +45,13 @@ namespace lala {
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3_str(const std::string& input, TableDecomposition d = TableDecomposition::ELEMENTS, const Allocator& allocator = Allocator()) {
-    FlatZincOutput<Allocator> output(allocator);
+    SolverOutput<Allocator> output(allocator, OutputType::XCSP);
     return parse_xcsp3_str(input, output, d);
   }
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, TableDecomposition d = TableDecomposition::ELEMENTS, const Allocator& allocator = Allocator()) {
-    FlatZincOutput<Allocator> output(allocator);
+    SolverOutput<Allocator> output(allocator, OutputType::XCSP);
     return parse_xcsp3(filename, output, d);
   }
 }
@@ -80,7 +82,7 @@ namespace XCSP3Core {
       using XCSP3CoreCallbacks::buildObjectiveMinimize;
       using XCSP3CoreCallbacks::buildObjectiveMaximize;
 
-      XCSP3_turbo_callbacks(::lala::FlatZincOutput<Allocator>& output, lala::TableDecomposition d = lala::TableDecomposition::ELEMENTS):
+      XCSP3_turbo_callbacks(::lala::SolverOutput<Allocator>& output, lala::TableDecomposition d = lala::TableDecomposition::ELEMENTS):
         XCSP3CoreCallbacks(), canonize(true), output(output), table_decomposition(d) {}
 
       virtual void beginInstance(InstanceType type) override;
@@ -174,6 +176,7 @@ namespace XCSP3Core {
       virtual void buildConstraintNoOverlap(string id, vector<XVariable *> &origins, vector<XVariable *> &lengths, bool zeroIgnored) override;
       virtual void buildConstraintNoOverlap(string id, vector<vector<XVariable *>> &origins, vector<vector<int>> &lengths, bool zeroIgnored) override;
       virtual void buildConstraintNoOverlap(string id, vector<vector<XVariable *>> &origins, vector<vector<XVariable *>> &lengths, bool zeroIgnored) override;
+      virtual void buildConstraintCumulative(string id, vector<XVariable *> &origins, vector<int> &lengths, vector<int> &heights, XCondition &xc) override;
       virtual void buildConstraintInstantiation(string id, vector<XVariable *> &list, vector<int> &values) override;
       virtual void buildConstraintClause(string id, vector<XVariable *> &positive, vector<XVariable *> &negative) override ;
       virtual void buildConstraintCircuit(string id, vector<XVariable *> &list, int startIndex) override;
@@ -191,7 +194,7 @@ namespace XCSP3Core {
 
       bool canonize;
       bool debug = false;
-      ::lala::FlatZincOutput<Allocator>& output;
+      ::lala::SolverOutput<Allocator>& output;
 
     private:
       std::vector<F> variables;
@@ -206,6 +209,7 @@ namespace XCSP3Core {
       F to_lala_logical_variable(XVariable *&variable);
       F to_lala_logical_variable(const string &variable);
       lala::LVar<Allocator> buildAuxVariableInteger(size_t maxValue);
+      lala::LVar<Allocator> buildAuxVariableInteger();
 
       public:
         size_t num_variables() const {
@@ -484,7 +488,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
       }
     }
   }
-  else {
+  else if(table_decomposition == lala::TableDecomposition::DISJUNCTIVE) {
     FSeq disjuncts;
     for(int i = 0; i < tuples.size(); ++i) {
       FSeq conjuncts;
@@ -508,6 +512,25 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     else if(disjuncts.size() > 1){
       constraints.push_back(F::make_nary(lala::OR, std::move(disjuncts)));
     }
+  }
+  else if(table_decomposition==lala::TableDecomposition::TABLE_PREDICATE) {
+    FSeq t_seq;
+    t_seq.push_back(F::make_z(tuples.size()));
+    t_seq.push_back(F::make_z(list.size()));
+    for(int i = 0; i < tuples.size(); ++i) {
+      for(int j = 0; j < tuples[i].size(); ++j) {
+        if(hasStar && tuples[i][j] == INT_MAX) {
+          t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>("*")));
+        }
+        else {
+          t_seq.push_back(F::make_z(tuples[i][j]));
+        }
+      }
+    }
+    for(int i = 0; i < list.size(); ++i) {
+      t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())));
+    }
+    constraints.push_back(F::make_nary("tables", std::move(t_seq)));
   }
 }
 
@@ -1517,6 +1540,63 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintNoOverlap(string, vector<v
   throw std::runtime_error("constraint unsupported");
 }
 
+/**
+  * The callback function related to a cumulative constraint with variable origins, int lengths and int heights
+  * See http://xcsp.org/specifications/cumulative
+  *
+  * Example:
+  * <cumulative>
+  *     <origins> s1 s2 s3 s4 </origins>
+  *     <lengths> 1 2 3 4 </lengths>
+  *     <heights> 3 4 5 6 </heights>
+  *     <condition> (le,4) </condition>
+  * </cumulative>
+  *
+  * @param id the id (name) of the constraint
+  * @param origins the vector of origins
+  * @param lengths the vector of lenghts (here ints)
+  * @param heights the vector of heights (here ints)
+  * @param xc the condition (see XCondition)
+  */
+// string id, vector<vector<XV
+template<class Allocator>
+void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vector<XVariable *> &origins, vector<int> &lengths, vector<int> &heights, XCondition &xc) {
+  battery::vector<F> vars;
+  for(int j=0;j<origins.size();j++) {
+    for(int i=0;i<origins.size();i++) {
+      if(i == j) {
+        continue;
+      }
+      auto left = F::make_binary(to_lala_logical_variable(origins[i]), lala::LEQ, to_lala_logical_variable(origins[j]));
+      auto right = F::make_binary(to_lala_logical_variable(origins[j]), lala::LT, F::make_binary(to_lala_logical_variable(origins[i]), lala::ADD, F::make_z(lengths[i])));
+      auto andand = F::make_binary(left, lala::AND, right);
+      auto bij = F::make_lvar(UNTYPED, buildAuxVariableInteger(1));
+      vars.push_back(bij);
+      auto equiv = F::make_binary(bij,lala::EQUIV,andand);
+      constraints.push_back(equiv);
+    }
+  }
+
+  for(int j=0;j<origins.size();j++) {
+    auto rkj = F::make_z(heights[j]);
+    FSeq sum;
+    sum.push_back(rkj);
+    for(int i=0;i<origins.size();i++) {
+      if(i == j) {
+        continue;
+      }
+      auto index = i*(origins.size()-1)+j;
+      sum.push_back(F::make_binary(F::make_z(heights[i]),lala::MUL,vars[index]));
+    }
+    auto left = F::make_nary(lala::ADD,std::move(sum));
+    constraints.push_back(F::make_binary(left,to_lala_operator(xc.op),to_lala_formula(xc)));
+  }
+
+}
+
+
+
+
 // string id, vector<XVariable *> &list, vector<int> &values
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildConstraintInstantiation(string, vector<XVariable *> &list, vector<int> &values) {
@@ -1616,34 +1696,83 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximizeVariable(XVariable 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjective type, vector<XVariable *> &list, vector<int> &coefs) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMinimize(type, list, coefs);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
+    displayList(coefs);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("minimization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_binary(F::make_lvar(UNTYPED,list[i]->id),lala::MUL,F::make_z(coefs[i])));
+  }
+
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MINIMIZE,optVariable));
 }
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjective type, vector<XVariable *> &list, vector<int> &coefs) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMaximize(type, list, coefs);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
+    displayList(coefs);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("maximization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
+
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_binary(F::make_lvar(UNTYPED,list[i]->id),lala::MUL,F::make_z(coefs[i])));
+  }
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MAXIMIZE,optVariable));
 }
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMinimize(ExpressionObjective type, vector<XVariable *> &list) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMinimize(type, list);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("minimization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_lvar(UNTYPED,list[i]->id));
+  }
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MINIMIZE,optVariable));
 }
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildObjectiveMaximize(ExpressionObjective type, vector<XVariable *> &list) {
   if(debug) {
-    XCSP3CoreCallbacks::buildObjectiveMaximize(type, list);
+    cout<<"objective of type " << type << " " << endl;
+    displayList(list);
   }
-  throw std::runtime_error("constraint unsupported");
+  if(type!=SUM_O) {
+    throw std::runtime_error("maximization of type "+to_string(type)+" unsupported");
+  }
+
+  battery::vector<F> sequences;
+  auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
+  for(int i=0;i<list.size();i++) {
+    sequences.push_back(F::make_lvar(UNTYPED,list[i]->id));
+  }
+  constraints.push_back(F::make_binary(optVariable,lala::EQ,F::make_nary(lala::ADD,sequences)));
+  constraints.push_back(F::make_unary(lala::MAXIMIZE,optVariable));
 }
+
 
 template<class Allocator>
 void XCSP3_turbo_callbacks<Allocator>::buildAnnotationDecision(vector<XVariable*> &list) {
@@ -1696,6 +1825,14 @@ lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::LEQ, F::make_z(maxValue)));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::GEQ, F::make_z(0)));
+  return auxVar;
+}
+
+template <class Allocator>
+lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger() {
+  lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
+  auxiliaryVariables++;
+  variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
   return auxVar;
 }
 

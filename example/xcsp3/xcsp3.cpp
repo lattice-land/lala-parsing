@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
     printf("usage: %s <XCSP3-filename.xml>\n", argv[0]);
     return 1;
   }
-  auto f = parse_xcsp3<battery::standard_allocator>(argv[1]);
+  auto f = parse_xcsp3<battery::standard_allocator>(argv[1],TableDecomposition::TABLE_PREDICATE);
   f->print(false);
   return 0;
 }

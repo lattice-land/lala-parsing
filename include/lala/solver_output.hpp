@@ -9,13 +9,13 @@
 namespace lala {
 
 enum class OutputType {
-  XML,
+  XCSP,
   FLATZINC
 };
 
 
 template<class Allocator>
-class Output {
+class SolverOutput {
   using bstring = battery::string<Allocator>;
   template<class T> using bvector = battery::vector<T, Allocator>;
   using array_dim_t = bvector<battery::tuple<size_t,size_t>>;
@@ -40,23 +40,23 @@ class Output {
 
 public:
   template <class Alloc2>
-  friend class Output;
+  friend class SolverOutput;
 
-  CUDA Output(const Allocator& alloc)
+  CUDA SolverOutput(const Allocator& alloc)
     : output_vars(alloc)
     , output_arrays(alloc),type(OutputType::FLATZINC)
   {}
 
-  CUDA Output(const Allocator& alloc,OutputType outputType)
+  CUDA SolverOutput(const Allocator& alloc,OutputType outputType)
       : output_vars(alloc)
       , output_arrays(alloc),type(outputType)
   {}
 
-  Output(Output&&) = default;
-  Output<Allocator>& operator=(const Output<Allocator>&) = default;
+  SolverOutput(SolverOutput&&) = default;
+  SolverOutput<Allocator>& operator=(const SolverOutput<Allocator>&) = default;
 
   template <class Alloc>
-  CUDA Output<Allocator>& operator=(const Output<Alloc>& other) {
+  CUDA SolverOutput<Allocator>& operator=(const SolverOutput<Alloc>& other) {
     output_vars = other.output_vars;
     output_arrays = other.output_arrays;
     type = other.type;
@@ -64,7 +64,7 @@ public:
   }
 
   template<class Alloc2>
-  CUDA Output(const Output<Alloc2>& other, const Allocator& allocator = Allocator{})
+  CUDA SolverOutput(const SolverOutput<Alloc2>& other, const Allocator& allocator = Allocator{})
     : output_vars(other.output_vars, allocator)
     , output_arrays(other.output_arrays, allocator),type(other.type)
   {}

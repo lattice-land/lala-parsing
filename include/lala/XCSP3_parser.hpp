@@ -36,7 +36,7 @@ namespace lala {
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, Output<Allocator>& output, TableDecomposition d = TableDecomposition::ELEMENTS) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, SolverOutput<Allocator>& output, TableDecomposition d = TableDecomposition::ELEMENTS) {
     ::XCSP3Core::XCSP3_turbo_callbacks<Allocator> cb(output, d);
     parse_xcsp3(filename, cb);
     return cb.build_formula();
@@ -44,13 +44,13 @@ namespace lala {
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3_str(const std::string& input, TableDecomposition d = TableDecomposition::ELEMENTS, const Allocator& allocator = Allocator()) {
-    Output<Allocator> output(allocator, OutputType::XML);
+    SolverOutput<Allocator> output(allocator, OutputType::XCSP);
     return parse_xcsp3_str(input, output, d);
   }
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_xcsp3(const std::string& filename, TableDecomposition d = TableDecomposition::ELEMENTS, const Allocator& allocator = Allocator()) {
-    Output<Allocator> output(allocator, OutputType::XML);
+    SolverOutput<Allocator> output(allocator, OutputType::XCSP);
     return parse_xcsp3(filename, output, d);
   }
 }
@@ -81,7 +81,7 @@ namespace XCSP3Core {
       using XCSP3CoreCallbacks::buildObjectiveMinimize;
       using XCSP3CoreCallbacks::buildObjectiveMaximize;
 
-      XCSP3_turbo_callbacks(::lala::Output<Allocator>& output, lala::TableDecomposition d = lala::TableDecomposition::ELEMENTS):
+      XCSP3_turbo_callbacks(::lala::SolverOutput<Allocator>& output, lala::TableDecomposition d = lala::TableDecomposition::ELEMENTS):
         XCSP3CoreCallbacks(), canonize(true), output(output), table_decomposition(d) {}
 
       virtual void beginInstance(InstanceType type) override;
@@ -193,7 +193,7 @@ namespace XCSP3Core {
 
       bool canonize;
       bool debug = false;
-      ::lala::Output<Allocator>& output;
+      ::lala::SolverOutput<Allocator>& output;
 
     private:
       std::vector<F> variables;

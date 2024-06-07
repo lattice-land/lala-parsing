@@ -52,7 +52,7 @@ class FlatZincParser {
   std::map<std::string, int> arrays; // Size of all named arrays (parameters and variables).
   bool error; // If an error was found during parsing.
   bool silent; // If we do not want to output error messages.
-  Output<Allocator>& output;
+  SolverOutput<Allocator>& output;
 
   // Contains all the annotations ignored.
   // It is used to avoid printing an error message more than once per annotation.
@@ -66,7 +66,7 @@ class FlatZincParser {
   };
 
 public:
-  FlatZincParser(Output<Allocator>& output): error(false), silent(false), output(output) {}
+  FlatZincParser(SolverOutput<Allocator>& output): error(false), silent(false), output(output) {}
 
   battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
     peg::parser parser(R"(
@@ -1022,13 +1022,13 @@ public:
       - Several solve items are allowed, which is useful for multi-objectives optimization.
   */
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, Output<Allocator>& output) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, SolverOutput<Allocator>& output) {
     impl::FlatZincParser<Allocator> parser(output);
     return parser.parse(input);
   }
 
   template<class Allocator>
-  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, Output<Allocator>& output) {
+  battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, SolverOutput<Allocator>& output) {
     std::ifstream t(filename);
     if(t.is_open()) {
       std::string input((std::istreambuf_iterator<char>(t)), std::istreambuf_iterator<char>());
@@ -1042,13 +1042,13 @@ public:
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc_str(const std::string& input, const Allocator& allocator = Allocator()) {
-    Output<Allocator> output(allocator);
+    SolverOutput<Allocator> output(allocator);
     return parse_flatzinc_str(input, output);
   }
 
   template<class Allocator>
   battery::shared_ptr<TFormula<Allocator>, Allocator> parse_flatzinc(const std::string& filename, const Allocator& allocator = Allocator()) {
-    Output<Allocator> output(allocator);
+    SolverOutput<Allocator> output(allocator);
     return parse_flatzinc(filename, output);
   }
 }

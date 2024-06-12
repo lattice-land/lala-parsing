@@ -421,7 +421,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, vector<in
   output.add_var(id.c_str());
   variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
 
-
   lala::logic_set<F> intervals;
   int start = values[0];
   int end = values[0];
@@ -429,14 +428,15 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, vector<in
   for (size_t i = 1; i < values.size(); ++i) {
     if (values[i] == end + 1) {
       end = values[i];
-    } else {
+    }
+    else {
       auto t = battery::make_tuple(F::make_z(start),F::make_z(end));
       intervals.push_back(t);
       start = values[i];
       end = values[i];
     }
   }
-  auto t = battery::make_tuple(F::make_z(start),F::make_z(end));
+  auto t = battery::make_tuple(F::make_z(start), F::make_z(end));
   intervals.push_back(t);
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::IN, F::make_set(intervals)));
 }

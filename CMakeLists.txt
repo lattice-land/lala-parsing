@@ -6,9 +6,15 @@ if(MSVC)
   set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Available configuration types to select")
 endif()
 
-project(lala-parsing
-  HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
-  LANGUAGES CUDA CXX)
+if(GPU)
+  project(lala-parsing
+    HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
+    LANGUAGES CUDA CXX)
+else()
+  project(lala-parsing
+    HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
+    LANGUAGES CXX)
+endif()
 option(LALA_PARSING_BUILD_EXAMPLES "LALA_PARSING_BUILD_EXAMPLES" OFF)
 option(LOCAL_DEPS "LOCAL_DEPS" OFF)
 option(WITH_XCSP3PARSER "Add support for parsing XCSP3 .xml files" ON)
@@ -45,7 +51,7 @@ else()
     FetchContent_Declare(
       xcsp3parser
       GIT_REPOSITORY    "https://github.com/xcsp3team/XCSP3-CPP-Parser"
-      GIT_TAG           35ee267bd65d4757117e1b778a3679ef4517c637
+      GIT_TAG           807f475c5b705d085215de61b811c1fbf0152398
     )
   endif()
 

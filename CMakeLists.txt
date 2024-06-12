@@ -6,7 +6,11 @@ if(MSVC)
   set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Available configuration types to select")
 endif()
 
+option(GPU "GPU" ON)
 if(GPU)
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "Targeted CUDA architectures")
+  endif()
   project(lala-parsing
     HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
     LANGUAGES CUDA CXX)

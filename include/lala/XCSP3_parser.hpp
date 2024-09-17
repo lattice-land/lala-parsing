@@ -477,15 +477,32 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
   lala::Sig sig = support ? lala::EQ : lala::NEQ;
   if(table_decomposition == lala::TableDecomposition::ELEMENTS) {
     size_t numVars = tuples[0].size();
-    auto auxVar = F::make_lvar(UNTYPED, buildAuxVariableInteger(numVars - 1));
-    for(int i = 0; i < numVars; ++i) {
-      for(int j = 0; j < tuples.size(); ++j) {
-        // index = i ==> varName = value
-        if(!hasStar || tuples[j][i] != INT_MAX) {
-          constraints.push_back(F::make_binary(
-            F::make_binary(auxVar, lala::EQ,  F::make_z(i)),
-            lala::IMPLY,
-            F::make_binary(to_lala_logical_variable(list[i]), sig, F::make_z(tuples[j][i]))));
+    if(support) {
+      auto auxVar = F::make_lvar(UNTYPED, buildAuxVariableInteger(numVars - 1));
+      for(int i = 0; i < numVars; ++i) {
+        for(int j = 0; j < tuples.size(); ++j) {
+          // index = i ==> varName = value
+          if(!hasStar || tuples[j][i] != INT_MAX) {
+            constraints.push_back(F::make_binary(
+              F::make_binary(auxVar, lala::EQ,  F::make_z(j)),
+              lala::IMPLY,
+              F::make_binary(to_lala_logical_variable(list[i]), lala::EQ, F::make_z(tuples[j][i]))));
+          }
+        }
+      }
+    }else {
+      for(int i = 0; i < tuples.size(); ++i) {
+        FSeq disjuncts;
+        for(int j = 0; j < numVars; ++j) {
+          if(!hasStar || tuples[i][j] != INT_MAX) {
+            disjuncts.push_back(
+              F::make_binary(to_lala_logical_variable(list[j]), lala::NEQ, F::make_z(tuples[i][j])));
+          }
+        }
+        if(disjuncts.size()==1) {
+          constraints.push_back(disjuncts[0]);
+        }else {
+          constraints.push_back(F::make_nary(lala::OR, std::move(disjuncts)));
         }
       }
     }

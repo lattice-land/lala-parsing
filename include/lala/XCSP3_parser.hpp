@@ -493,7 +493,26 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
       }
     }
   }
-  else if (table_decomposition == lala::TableDecomposition::DISJUNCTIVE) {
+  else if (table_decomposition == lala::TableDecomposition::TABLE_PREDICATE) {
+    FSeq t_seq;
+    t_seq.push_back(F::make_z(tuples.size()));
+    t_seq.push_back(F::make_z(list.size()));
+    for (int i = 0; i < tuples.size(); ++i) {
+      for (int j = 0; j < tuples[i].size(); ++j) {
+        if (hasStar && tuples[i][j] == INT_MAX) {
+          t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>("*")));
+        }
+        else {
+          t_seq.push_back(F::make_z(tuples[i][j]));
+        }
+      }
+    }
+    for (int i = 0; i < list.size(); ++i) {
+      t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())));
+    }
+    constraints.push_back(F::make_nary("tables", std::move(t_seq)));
+  }else {
+    //disjunctive case
     lala::Sig internal_sig = support ? lala::AND : lala::OR;
     lala::Sig external_sig = support ? lala::OR : lala::AND;
     FSeq external_seq;
@@ -520,25 +539,6 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     else if (external_seq.size() > 1) {
       constraints.push_back(F::make_nary(external_sig, std::move(external_seq)));
     }
-  }
-  else if (table_decomposition == lala::TableDecomposition::TABLE_PREDICATE) {
-    FSeq t_seq;
-    t_seq.push_back(F::make_z(tuples.size()));
-    t_seq.push_back(F::make_z(list.size()));
-    for (int i = 0; i < tuples.size(); ++i) {
-      for (int j = 0; j < tuples[i].size(); ++j) {
-        if (hasStar && tuples[i][j] == INT_MAX) {
-          t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>("*")));
-        }
-        else {
-          t_seq.push_back(F::make_z(tuples[i][j]));
-        }
-      }
-    }
-    for (int i = 0; i < list.size(); ++i) {
-      t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())));
-    }
-    constraints.push_back(F::make_nary("tables", std::move(t_seq)));
   }
 }
 

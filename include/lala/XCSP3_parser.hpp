@@ -480,7 +480,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
   lala::Sig sig = support ? lala::EQ : lala::NEQ;
   if (table_decomposition == lala::TableDecomposition::ELEMENTS && support) {
     size_t numVars = tuples[0].size();
-    auto auxVar = F::make_lvar(UNTYPED, buildAuxVariableInteger(numVars - 1));
+    auto auxVar = F::make_lvar(UNTYPED, buildAuxVariableInteger(tuples.size() -1));
     for (int i = 0; i < numVars; ++i) {
       for (int j = 0; j < tuples.size(); ++j) {
         // index = i ==> varName = value

@@ -483,7 +483,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     auto auxVar = F::make_lvar(UNTYPED, buildAuxVariableInteger(numVars - 1));
     for (int i = 0; i < numVars; ++i) {
       for (int j = 0; j < tuples.size(); ++j) {
-        // index = i ==> varName = value
+        // index = j ==> varName = value
         if (!hasStar || tuples[j][i] != INT_MAX) {
           constraints.push_back(F::make_binary(
             F::make_binary(auxVar, lala::EQ, F::make_z(j)),

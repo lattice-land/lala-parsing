@@ -4,6 +4,9 @@
 
 #ifndef OUTPUT_H
 #define OUTPUT_H
+#include <functional>
+#include <peglib.h>
+#include <lala/logic/ast.hpp>
 
 
 namespace lala {

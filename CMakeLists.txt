@@ -48,7 +48,7 @@ else()
   FetchContent_Declare(
     lala_core
     GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
-    GIT_TAG        v1.2.2
+    GIT_TAG        v1.2.3
   )
 
   if(WITH_XCSP3PARSER)

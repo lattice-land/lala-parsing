@@ -1,13 +1,11 @@
-//
-// Created by falque on 05/06/24.
-//
+// Copyright 2024 Thibault Falque, Pierre Talbot
 
-#ifndef OUTPUT_H
-#define OUTPUT_H
+#ifndef LALA_PARSING_SOLVER_OUTPUT_HPP
+#define LALA_PARSING_SOLVER_OUTPUT_HPP
+
 #include <functional>
 #include <peglib.h>
 #include <lala/logic/ast.hpp>
-
 
 namespace lala {
 
@@ -15,7 +13,6 @@ enum class OutputType {
   XCSP,
   FLATZINC
 };
-
 
 template<class Allocator>
 class SolverOutput {
@@ -99,9 +96,7 @@ public:
   void add_var(const bstring& var_name) {
     output_vars.push_back(var_name);
   }
-  bvector<bstring> getOutputVars(){
-    return output_vars;
-  }
+
   class SimplifierIdentity {
     template <class Alloc, class B, class Env>
     CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
@@ -148,8 +143,6 @@ public:
     printf("</values> </instantiation>\n");
   }
 
-
-
   template <class Env, class A, class S>
   CUDA void print_solution(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     if(type == OutputType::FLATZINC) {
@@ -158,8 +151,8 @@ public:
       print_solution_xml(env, sol, simplifier);
     }
   }
-
 };
 
 } // namespace lala
-#endif //OUTPUT_H
+
+#endif

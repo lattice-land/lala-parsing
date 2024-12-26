@@ -99,9 +99,11 @@ public:
   void add_var(const bstring& var_name) {
     output_vars.push_back(var_name);
   }
+
   bvector<bstring> getOutputVars(){
     return output_vars;
   }
+
   class SimplifierIdentity {
     template <class Alloc, class B, class Env>
     CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
@@ -148,13 +150,12 @@ public:
     printf("</values> </instantiation>\n");
   }
 
-
-
   template <class Env, class A, class S>
   CUDA void print_solution(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     if(type == OutputType::FLATZINC) {
       print_solution_flat_zinc(env, sol, simplifier);
-    }else{
+    }
+    else {
       print_solution_xml(env, sol, simplifier);
     }
   }

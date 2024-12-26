@@ -20,6 +20,7 @@ else()
     LANGUAGES CXX)
 endif()
 option(LALA_PARSING_BUILD_EXAMPLES "LALA_PARSING_BUILD_EXAMPLES" OFF)
+option(LALA_PARSING_BUILD_DOC "LALA_PARSING_BUILD_DOC" OFF)
 option(LOCAL_DEPS "LOCAL_DEPS" OFF)
 option(WITH_XCSP3PARSER "Add support for parsing XCSP3 .xml files" ON)
 
@@ -48,7 +49,7 @@ else()
   FetchContent_Declare(
     lala_core
     GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
-    GIT_TAG        v1.2.3
+    GIT_TAG        v1.2.4
   )
 
   if(WITH_XCSP3PARSER)
@@ -100,6 +101,8 @@ endif()
 
 # Documentation
 
+if(LALA_PARSING_BUILD_DOC)
+
 find_package(Doxygen REQUIRED doxygen)
 
 set(DOXYGEN_PROJECT_NAME "Lattice Land Parsing Library")
@@ -130,3 +133,4 @@ doxygen_add_docs(doc_lalaparsing
                  "include/"
                  ALL
                  COMMENT "Generate HTML documentation")
+endif()

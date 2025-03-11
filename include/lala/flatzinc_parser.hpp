@@ -436,6 +436,7 @@ public:
       if (name == "bool_eq") { return make_binary(EQ, sv); }
       if (name == "bool_le") { return make_binary(LEQ, sv); }
       if (name == "bool_lt") { return make_binary(LT, sv); }
+      if (name == "bool_imply") { return make_binary(IMPLY, sv); }
       if (name == "bool_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
       if (name == "bool_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       if (name == "bool_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }

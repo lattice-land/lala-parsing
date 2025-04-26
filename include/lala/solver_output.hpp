@@ -38,7 +38,6 @@ class SolverOutput {
     return result;
   }
 
-
 public:
   template <class Alloc2>
   friend class SolverOutput;

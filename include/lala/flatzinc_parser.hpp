@@ -420,7 +420,11 @@ public:
       if (name == "int_ne") { return make_binary(NEQ, sv); }
       if (name == "int_abs") { return make_unary_fun_eq(ABS, sv); }
       if (name == "int_neg") { return make_unary_fun_eq(NEG, sv); }
-      if (name == "int_div") { return make_binary_fun_eq(EDIV, sv); }
+      if (name == "int_div") { return make_binary_fun_eq(TDIV, sv); }
+      if (name == "int_ediv") { return make_binary_fun_eq(EDIV, sv); }
+      if (name == "int_tdiv") { return make_binary_fun_eq(TDIV, sv); }
+      if (name == "int_cdiv") { return make_binary_fun_eq(CDIV, sv); }
+      if (name == "int_fdiv") { return make_binary_fun_eq(FDIV, sv); }
       if (name == "int_mod") { return make_binary_fun_eq(EMOD, sv); }
       if (name == "int_plus") { return make_binary_fun_eq(ADD, sv); }
       if (name == "int_minus") { return make_binary_fun_eq(SUB, sv); }
@@ -567,7 +571,11 @@ public:
         error = err;
         if(name == "int_abs") { return make_unary_fun(ABS, sv); }
         if (name == "int_neg") { return make_unary_fun(NEG, sv); }
-        if (name == "int_div") { return make_binary_fun(EDIV, sv); }
+        if (name == "int_div") { return make_binary_fun(TDIV, sv); }
+        if (name == "int_ediv") { return make_binary_fun(EDIV, sv); }
+        if (name == "int_fdiv") { return make_binary_fun(FDIV, sv); }
+        if (name == "int_cdiv") { return make_binary_fun(CDIV, sv); }
+        if (name == "int_tdiv") { return make_binary_fun(TDIV, sv); }
         if (name == "int_mod") { return make_binary_fun(EMOD, sv); }
         if (name == "int_plus") { return make_binary_fun(ADD, sv); }
         if (name == "int_minus") { return make_binary_fun(SUB, sv); }

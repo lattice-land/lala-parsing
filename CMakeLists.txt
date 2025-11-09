@@ -3,19 +3,19 @@ cmake_minimum_required(VERSION 3.24)
 cmake_policy(SET CMP0135 NEW)
 
 if(MSVC)
-  set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Available configuration types to select")
+    set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Available configuration types to select")
 endif()
 
 option(GPU "GPU" ON)
 if(GPU)
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "Targeted CUDA architectures")
-  endif()
-  project(lala-parsing
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES native CACHE STRING "Targeted CUDA architectures")
+    endif()
+    project(lala-parsing
     HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
     LANGUAGES CUDA CXX)
 else()
-  project(lala-parsing
+    project(lala-parsing
     HOMEPAGE_URL "https://github.com/lattice-land/lala-parsing"
     LANGUAGES CXX)
 endif()
@@ -23,14 +23,15 @@ option(LALA_PARSING_BUILD_EXAMPLES "LALA_PARSING_BUILD_EXAMPLES" OFF)
 option(LALA_PARSING_BUILD_DOC "LALA_PARSING_BUILD_DOC" OFF)
 option(LOCAL_DEPS "LOCAL_DEPS" OFF)
 option(WITH_XCSP3PARSER "Add support for parsing XCSP3 .xml files" ON)
+option(NNV "Add neural network verification related parsing tools" ON)
 
 if(MSVC)
-  # XCSP3-CPP-Parser has dependencies on gcc that break MSVC
-  set(WITH_XCSP3PARSER OFF)
+    # XCSP3-CPP-Parser has dependencies on gcc that break MSVC
+    set(WITH_XCSP3PARSER OFF)
 endif()
 
 if(WITH_XCSP3PARSER)
-  set(XCSP3PARSER xcsp3parser)
+    set(XCSP3PARSER xcsp3parser)
 endif()
 
 # Dependencies
@@ -38,29 +39,29 @@ endif()
 include(FetchContent)
 
 if(LOCAL_DEPS)
-  FetchContent_Declare(lala_core SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../lala-core/")
+    FetchContent_Declare(lala_core SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../lala-core/")
 
-  if(WITH_XCSP3PARSER)
-    FetchContent_Declare(xcsp3parser SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../XCSP3-CPP-Parser/")
-  endif()
+    if(WITH_XCSP3PARSER)
+        FetchContent_Declare(xcsp3parser SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../XCSP3-CPP-Parser/")
+    endif()
 
-  FetchContent_Declare(cpp_peglib SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../cpp-peglib/")
+    FetchContent_Declare(cpp_peglib SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../cpp-peglib/")
 else()
-  FetchContent_Declare(
+    FetchContent_Declare(
     lala_core
     GIT_REPOSITORY "https://github.com/lattice-land/lala-core.git"
     GIT_TAG        v1.2.8
   )
 
-  if(WITH_XCSP3PARSER)
-    FetchContent_Declare(
+    if(WITH_XCSP3PARSER)
+        FetchContent_Declare(
       xcsp3parser
       GIT_REPOSITORY    "https://github.com/xcsp3team/XCSP3-CPP-Parser"
       GIT_TAG           807f475c5b705d085215de61b811c1fbf0152398
     )
-  endif()
+    endif()
 
-  FetchContent_Declare(
+    FetchContent_Declare(
     cpp_peglib
     GIT_REPOSITORY "https://github.com/ptal/cpp-peglib.git"
     GIT_TAG        245b59446d424b499b316ee77ec59de18443de23
@@ -71,9 +72,45 @@ FetchContent_MakeAvailable(lala_core ${XCSP3PARSER} cpp_peglib)
 
 # Preparing the library
 
+if(NNV)
+    set(NNV_TOOLS_DIR "${CMAKE_CURRENT_LIST_DIR}/include/lala")
+    set(PROTOBUF_VERSION 3.19.2)
+    set(PROTOBUF_DEFAULT_DIR "${NNV_TOOLS_DIR}/protobuf-${PROTOBUF_VERSION}")
+    if(NOT PROTOBUF_DIR)
+        set(PROTOBUF_DIR "${PROTOBUF_DEFAULT_DIR}")
+    endif()
+
+    # Download & build protobuf if missing
+    if(NOT EXISTS "${PROTOBUF_DIR}/installed/lib/libprotobuf.a")
+        message(STATUS "Protobuf not found, installing ...")
+        execute_process(COMMAND ${NNV_TOOLS_DIR}/download_protobuf.sh ${PROTOBUF_VERSION})
+    endif()
+
+    add_library(PROTOBUF_LIB SHARED IMPORTED)
+    set_target_properties(PROTOBUF_LIB PROPERTIES IMPORTED_LOCATION "${PROTOBUF_DIR}/installed/lib/libprotobuf.a")
+    target_include_directories(PROTOBUF_LIB INTERFACE "${PROTOBUF_DIR}/installed/include")
+
+    # ONNX
+    set(ONNX_VERSION 1.15.0)
+    set(ONNX_DIR "${NNV_TOOLS_DIR}/onnx-${ONNX_VERSION}")
+    if(NOT EXISTS "${ONNX_DIR}/onnx.proto3.pb.h")
+        message(STATUS "Generating ONNX protobuf file")
+        execute_process(COMMAND ${NNV_TOOLS_DIR}/download_onnx.sh ${ONNX_VERSION} ${PROTOBUF_VERSION})
+    endif()
+    file(GLOB DEPS_ONNX "${ONNX_DIR}/*.cc")
+    include_directories(SYSTEM "${ONNX_DIR}")
+endif()
+
 add_library(lala_parsing INTERFACE)
 target_include_directories(lala_parsing INTERFACE include ${LIBXML2_INCLUDE_DIR})
 target_link_libraries(lala_parsing INTERFACE lala_core ${XCSP3PARSER} cpp_peglib)
+
+if(NNV)
+    target_include_directories(lala_parsing INTERFACE ${PROTOBUF_DIR}/installed/include ${ONNX_DIR})
+    target_sources(lala_parsing INTERFACE ${DEPS_ONNX})
+    target_link_libraries(lala_parsing INTERFACE PROTOBUF_LIB)
+endif()
+
 target_compile_options(lala_parsing INTERFACE
     $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/Zc:__cplusplus /utf-8 /fp:strict>
     "$<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CUDA_COMPILER_ID:NVIDIA>,$<CXX_COMPILER_ID:MSVC>>:SHELL:--compiler-options /Zc:__cplusplus>"
@@ -89,13 +126,13 @@ target_compile_options(lala_parsing INTERFACE
 
 if(LALA_PARSING_BUILD_EXAMPLES)
 
-if(WITH_XCSP3PARSER)
-add_executable(example_xcsp3 example/xcsp3/xcsp3.cpp)
-target_link_libraries(example_xcsp3 PRIVATE lala_parsing)
-endif()
+    if(WITH_XCSP3PARSER)
+        add_executable(example_xcsp3 example/xcsp3/xcsp3.cpp)
+        target_link_libraries(example_xcsp3 PRIVATE lala_parsing)
+    endif()
 
-add_executable(example_flatzinc example/flatzinc/flatzinc.cpp)
-target_link_libraries(example_flatzinc PRIVATE lala_parsing)
+    add_executable(example_flatzinc example/flatzinc/flatzinc.cpp)
+    target_link_libraries(example_flatzinc PRIVATE lala_parsing)
 
 endif()
 
@@ -103,33 +140,33 @@ endif()
 
 if(LALA_PARSING_BUILD_DOC)
 
-find_package(Doxygen REQUIRED doxygen)
+    find_package(Doxygen REQUIRED doxygen)
 
-set(DOXYGEN_PROJECT_NAME "Lattice Land Parsing Library")
-set(DOXYGEN_BUILTIN_STL_SUPPORT YES)
-set(DOXYGEN_CASE_SENSE_NAMES NO)
-set(DOXYGEN_CLASS_DIAGRAMS NO)
-set(DOXYGEN_DISTRIBUTE_GROUP_DOC YES)
-set(DOXYGEN_EXTRACT_ALL YES)
-set(DOXYGEN_EXTRACT_PRIVATE NO)
-set(DOXYGEN_FILE_PATTERNS *.hpp)
-set(DOXYGEN_GENERATE_TREEVIEW YES)
-set(DOXYGEN_HIDE_IN_BODY_DOCS YES)
-set(DOXYGEN_QUIET YES)
-set(DOXYGEN_RECURSIVE YES)
-set(DOXYGEN_SORT_BY_SCOPE_NAME YES)
-set(DOXYGEN_SORT_MEMBER_DOCS NO)
-set(DOXYGEN_SOURCE_BROWSER NO)
-set(DOXYGEN_STRIP_CODE_COMMENTS NO)
-set(DOXYGEN_USE_MATHJAX YES)
-set(DOXYGEN_EXTRA_PACKAGES stmaryrd)
-set(DOXYGEN_EXCLUDE_SYMBOLS = impl)
-set(DOXYGEN_ENABLE_PREPROCESSING YES)
-set(DOXYGEN_PREDEFINED __NVCC__)
-set(DOXYGEN_REFERENCED_BY_RELATION NO)
-set(DOXYGEN_REFERENCES_RELATION NO)
+    set(DOXYGEN_PROJECT_NAME "Lattice Land Parsing Library")
+    set(DOXYGEN_BUILTIN_STL_SUPPORT YES)
+    set(DOXYGEN_CASE_SENSE_NAMES NO)
+    set(DOXYGEN_CLASS_DIAGRAMS NO)
+    set(DOXYGEN_DISTRIBUTE_GROUP_DOC YES)
+    set(DOXYGEN_EXTRACT_ALL YES)
+    set(DOXYGEN_EXTRACT_PRIVATE NO)
+    set(DOXYGEN_FILE_PATTERNS *.hpp)
+    set(DOXYGEN_GENERATE_TREEVIEW YES)
+    set(DOXYGEN_HIDE_IN_BODY_DOCS YES)
+    set(DOXYGEN_QUIET YES)
+    set(DOXYGEN_RECURSIVE YES)
+    set(DOXYGEN_SORT_BY_SCOPE_NAME YES)
+    set(DOXYGEN_SORT_MEMBER_DOCS NO)
+    set(DOXYGEN_SOURCE_BROWSER NO)
+    set(DOXYGEN_STRIP_CODE_COMMENTS NO)
+    set(DOXYGEN_USE_MATHJAX YES)
+    set(DOXYGEN_EXTRA_PACKAGES stmaryrd)
+    set(DOXYGEN_EXCLUDE_SYMBOLS = impl)
+    set(DOXYGEN_ENABLE_PREPROCESSING YES)
+    set(DOXYGEN_PREDEFINED __NVCC__)
+    set(DOXYGEN_REFERENCED_BY_RELATION NO)
+    set(DOXYGEN_REFERENCES_RELATION NO)
 
-doxygen_add_docs(doc_lalaparsing
+    doxygen_add_docs(doc_lalaparsing
                  "include/"
                  ALL
                  COMMENT "Generate HTML documentation")

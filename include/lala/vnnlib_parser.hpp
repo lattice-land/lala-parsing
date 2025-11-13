@@ -3,16 +3,15 @@
 #ifndef LALA_PARSING_VNNLIB_PARSER_HPP
 #define LALA_PARSING_VNNLIB_PARSER_HPP
 
+#include <any>
 #include <cassert>
-#include <cfenv>
-#include <cinttypes>
+#include <cstddef>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <istream>
-#include <set>
-#include <streambuf>
+#include <iterator>
 #include <string>
+#include <system_error>
 
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
@@ -34,24 +33,24 @@ template <class Allocator> class VnnlibParser {
   bool silent; // If we do not want to output error messages.
 
 public:
-  VnnlibParser() : error(false), silent(false) {}
+  VnnlibParser(SolverOutput<Allocator> &output) : error(false), silent(false) {}
 
   battery::shared_ptr<F, allocator_type> parse(const std::string &input) {
     peg::parser parser(R"(
                             Statements              <- (DeclareVar / Assertion / Comment)+
 
-                            Integer                 <- < [+-]? [0-9]+ >
                             Real                    <- < (
-                                                        'inf'
-                                                        / '-inf'
-                                                        / [+-]? [0-9]+ (('.' (&'..' / !'.') [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
-                            Identifier              <- < [a-zA-Z_][a-zA-Z0-9_]* >
+                                                            'inf'
+                                                            / '-inf'
+                                                            / [+-]? [0-9]+ (('.' (&'..' / !'.') [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
+                            Integer                 <- < [+-]? [0-9]+ >
+                            Identifier              <- [a-zA-Z_][a-zA-Z0-9_]*
 
-                            BinaryOp                <- '<=' / '>='
-                            LogicOp                 <- 'or' / 'and'
+                            BinaryOp                <- < '<=' / '>=' >
+                            LogicOp                 <- < 'or' / 'and' >
 
                             DeclareVar              <- '(declare-const '  Identifier ' Real' ')'
-                            Bound                   <- '(' BinaryOp [ \t]* Identifier [ \t]* (Real / Identifier) [ \t]* ')'
+                            Bound                   <- '(' BinaryOp [ \t]* Identifier [ \t]* (Real / Integer / Identifier) [ \t]* ')'
                             Constraint              <- '(' LogicOp [ \t]* Bound* ')' 
                             Assertion               <- '(assert ' Bound ')' / '(assert (' LogicOp+ Constraint* '))' 
 
@@ -61,6 +60,7 @@ public:
 
     assert(static_cast<bool>(parser) == true);
 
+    parser["Statements"] = [this](const SV &sv) { return make_statements(sv); };
     parser["Integer"] = [](const SV &sv) {
       return F::make_z(sv.token_to_number<logic_int>());
     };
@@ -78,6 +78,7 @@ public:
     parser["Assertion"] = [this](const SV &sv) { return make_assertion(sv); };
 
     F f;
+    std::cout << input.c_str() << std::endl;
     if (parser.parse(input.c_str(), f) && !error) {
       return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
     } else {
@@ -98,8 +99,24 @@ private:
     return F::make_false();
   }
 
+  F make_statements(const SV &sv) {
+    if (sv.size() == 1) {
+      return f(sv[0]);
+    } else {
+      FSeq children;
+      for (size_t i = 0; i < sv.size(); ++i) {
+        F formula = f(sv[i]);
+        if (!formula.is_true()) {
+          children.push_back(formula);
+        }
+      }
+      return F::make_nary(AND, std::move(children));
+    }
+  }
+
   F make_variable_decl(const SV &sv) {
     auto name = std::any_cast<std::string>(sv[0]);
+    std::cout << "variable name = " << name.data() << std::endl;
     auto ty = So(So::Real);
 
     return F::make_exists(UNTYPED, LVar<allocator_type>(name.data()), ty);
@@ -109,10 +126,27 @@ private:
     auto binary_operator = std::any_cast<std::string>(sv[0]);
     auto name = std::any_cast<std::string>(sv[1]);
 
-    if (binary_operator == "<=") {
-      return F::make_binary(f(name), LEQ, f(sv[2]));
-    } else if (binary_operator == ">=") {
-      return F::make_binary(f(name), GEQ, f(sv[2]));
+    try {
+      if (binary_operator == "<=") {
+        return F::make_binary(
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), LEQ,
+            f(sv[2]));
+      } else if (binary_operator == ">=") {
+        return F::make_binary(
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), GEQ,
+            f(sv[2]));
+      }
+    } catch (std::bad_any_cast) {
+      auto name2 = std::any_cast<std::string>(sv[2]);
+      if (binary_operator == "<=") {
+        return F::make_binary(
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), LEQ,
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
+      } else if (binary_operator == ">=") {
+        return F::make_binary(
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), GEQ,
+            F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
+      }
     }
   }
 
@@ -142,6 +176,44 @@ private:
   }
 };
 } // namespace impl
+
+template <class Allocator>
+battery::shared_ptr<TFormula<Allocator>, Allocator>
+parse_vnnlib_str(const std::string &input, SolverOutput<Allocator> &output) {
+  impl::VnnlibParser<Allocator> parser(output);
+  return parser.parse(input);
+}
+
+template <class Allocator>
+battery::shared_ptr<TFormula<Allocator>, Allocator>
+parse_vnnlib(const std::string &filename, SolverOutput<Allocator> &output) {
+  std::ifstream t(filename);
+  if (t.is_open()) {
+    std::string input((std::istreambuf_iterator<char>(t)),
+                      std::istreambuf_iterator<char>());
+    return parse_vnnlib_str<Allocator>(input, output);
+  } else {
+    std::cerr << "File `" << filename << "` does not exists." << std::endl;
+  }
+  return nullptr;
+}
+
+template <class Allocator>
+battery::shared_ptr<TFormula<Allocator>, Allocator>
+parse_vnnlib_str(const std::string &input,
+                 const Allocator &allocator = Allocator()) {
+  SolverOutput<Allocator> output(allocator);
+  return parse_vnnlib_str(input, output);
+}
+
+template <class Allocator>
+battery::shared_ptr<TFormula<Allocator>, Allocator>
+parse_vnnlib(const std::string &filename,
+             const Allocator &allocator = Allocator()) {
+  SolverOutput<Allocator> output(allocator);
+  return parse_vnnlib(filename, output);
+}
+
 } // namespace lala
 
 #endif

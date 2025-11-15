@@ -22,74 +22,71 @@ namespace lala {
 
 namespace impl {
 
-template <class Allocator> class VnnlibParser {
+template <class Allocator>
+class VnnlibParser {
   using allocator_type = Allocator;
   using F = TFormula<allocator_type>;
   using SV = peg::SemanticValues;
   using So = Sort<allocator_type>;
   using FSeq = typename F::Sequence;
 
-  bool error;  // If an error was found during parsing.
-  bool silent; // If we do not want to output error messages.
+  bool error;   // If an error was found during parsing.
+  bool silent;  // If we do not want to output error messages.
 
-public:
-  VnnlibParser(SolverOutput<Allocator> &output) : error(false), silent(false) {}
+  SolverOutput<Allocator>& output;
 
-  battery::shared_ptr<F, allocator_type> parse(const std::string &input) {
-    peg::parser parser(R"(
-                            Statements              <- (DeclareVar / Assertion / Comment)+
+ public:
+  VnnlibParser(SolverOutput<Allocator>& output) : error(false), silent(false), output(output) {}
 
-                            Real                    <- < (
-                                                            'inf'
-                                                            / '-inf'
-                                                            / [+-]? [0-9]+ (('.' (&'..' / !'.') [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
-                            Integer                 <- < [+-]? [0-9]+ >
-                            Identifier              <- [a-zA-Z_][a-zA-Z0-9_]*
+  F parse(const std::string& input) {
+			peg::parser parser(R"(
+				Statements    <- (DeclareVar / Assertion / Comment)+
 
-                            BinaryOp                <- < '<=' / '>=' >
-                            LogicOp                 <- < 'or' / 'and' >
+				Integer       <- < [+-]?[0-9]+ >
+				Real          <- < ('inf' / '-inf' /
+														[+-]?[0-9]+ (('.' (&'..' / !'.') [0-9]*) /
+														([Ee][+-]?[0-9]+)) ) >
+				Identifier    <- < [a-zA-Z_][a-zA-Z0-9_]* >
 
-                            DeclareVar              <- '(declare-const '  Identifier ' Real' ')'
-                            Bound                   <- '(' BinaryOp [ \t]* Identifier [ \t]* (Real / Integer / Identifier) [ \t]* ')'
-                            Constraint              <- '(' LogicOp [ \t]* Bound* ')' 
-                            Assertion               <- '(assert ' Bound ')' / '(assert (' LogicOp+ Constraint* '))' 
+				BinaryOp      <- < '<=' / '>=' >
+				LogicOp       <- < 'and' / 'or' >
 
-                            ~Comment                <- ';' [^\n\r]* [ \n\r\t]*
-                            %whitespace             <- [ \n\r\t]*
-                           )");
+				DeclareVar    <- '(' 'declare-const' Identifier 'Real' ')'
+				Bound         <- '(' BinaryOp Identifier (Real / Integer / Identifier) ')'
+				Constraint    <- '(' LogicOp Bound+ ')'
+				Assertion     <- '(assert' Bound ')' / '(assert' '(' LogicOp Constraint+ '))'
 
+				~Comment       <- ';' [^\n\r]*
+				%whitespace   <- [ \t\r\n]*
+			)");
     assert(static_cast<bool>(parser) == true);
 
-    parser["Statements"] = [this](const SV &sv) { return make_statements(sv); };
-    parser["Integer"] = [](const SV &sv) {
-      return F::make_z(sv.token_to_number<logic_int>());
-    };
-    parser["Real"] = [](const SV &sv) {
-      return F::make_real(string_to_real(sv.token_to_string()));
-    };
-    parser["Identifier"] = [](const SV &sv) { return sv.token_to_string(); };
-    parser["BinaryOp"] = [](const SV &sv) { return sv.token_to_string(); };
-    parser["LogicOp"] = [](const SV &sv) { return sv.token_to_string(); };
-    parser["DeclareVar"] = [this](const SV &sv) {
-      return make_variable_decl(sv);
-    };
-    parser["Bound"] = [this](const SV &sv) { return make_bound(sv); };
-    parser["Constraint"] = [this](const SV &sv) { return make_constraint(sv); };
-    parser["Assertion"] = [this](const SV &sv) { return make_assertion(sv); };
+    parser["Statements"] = [this](const SV& sv) { return make_statements(sv); };
+    parser["Integer"] = [](const SV& sv) { return F::make_z(sv.token_to_number<logic_int>()); };
+    parser["Real"] = [](const SV& sv) { return F::make_real(string_to_real(sv.token_to_string())); };
+    parser["Identifier"] = [](const SV& sv) { return sv.token_to_string(); };
+    parser["BinaryOp"] = [](const SV& sv) { return sv.token_to_string(); };
+    parser["LogicOp"] = [](const SV& sv) { return sv.token_to_string(); };
+    parser["DeclareVar"] = [this](const SV& sv) { return make_variable_decl(sv); };
+    parser["Bound"] = [this](const SV& sv) { return make_bound(sv); };
+    parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
+    parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
     F f;
     std::cout << input.c_str() << std::endl;
     if (parser.parse(input.c_str(), f) && !error) {
-      return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(f));
-    } else {
-      return nullptr;
+      return f;
+    } 
+    else {
+      // in here, f will be empty;
+      return f;
     }
   }
 
-private:
-  static F f(const std::any &any) { return std::any_cast<F>(any); }
+ private:
+  static F f(const std::any& any) { return std::any_cast<F>(any); }
 
-  F make_error(const SV &sv, const std::string &msg) {
+  F make_error(const SV& sv, const std::string& msg) {
     if (!silent) {
       std::cerr << sv.line_info().first << ":" << sv.line_info().second << ":"
                 << msg << std::endl;
@@ -99,10 +96,11 @@ private:
     return F::make_false();
   }
 
-  F make_statements(const SV &sv) {
+  F make_statements(const SV& sv) {
     if (sv.size() == 1) {
       return f(sv[0]);
-    } else {
+    } 
+    else {
       FSeq children;
       for (size_t i = 0; i < sv.size(); ++i) {
         F formula = f(sv[i]);
@@ -114,7 +112,7 @@ private:
     }
   }
 
-  F make_variable_decl(const SV &sv) {
+  F make_variable_decl(const SV& sv) {
     auto name = std::any_cast<std::string>(sv[0]);
     std::cout << "variable name = " << name.data() << std::endl;
     auto ty = So(So::Real);
@@ -122,35 +120,41 @@ private:
     return F::make_exists(UNTYPED, LVar<allocator_type>(name.data()), ty);
   }
 
-  F make_bound(const SV &sv) {
+  F make_bound(const SV& sv) {
     auto binary_operator = std::any_cast<std::string>(sv[0]);
     auto name = std::any_cast<std::string>(sv[1]);
 
     try {
       if (binary_operator == "<=") {
         return F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), LEQ,
-            f(sv[2]));
-      } else if (binary_operator == ">=") {
+					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
+					LEQ,
+					f(sv[2]));
+      } 
+      else if (binary_operator == ">=") {
         return F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), GEQ,
-            f(sv[2]));
+					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
+					GEQ,
+					f(sv[2]));
       }
     } catch (std::bad_any_cast) {
       auto name2 = std::any_cast<std::string>(sv[2]);
       if (binary_operator == "<=") {
         return F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), LEQ,
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
-      } else if (binary_operator == ">=") {
+					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
+					LEQ,
+					F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
+      } 
+      else if (binary_operator == ">=") {
         return F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), GEQ,
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
+					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
+					GEQ,
+					F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
       }
     }
   }
 
-  F make_constraint(const SV &sv) {
+  F make_constraint(const SV& sv) {
     auto logic_operator = std::any_cast<std::string>(sv[0]);
 
     // We suppose the logic operator is always "and" for now.
@@ -162,10 +166,11 @@ private:
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_assertion(const SV &sv) {
+  F make_assertion(const SV& sv) {
     if (sv.size() == 1) {
       return f(sv[0]);
-    } else {
+    } 
+    else {
       FSeq disjuncts;
       for (int i = 0; i < sv.size(); ++i) {
         disjuncts.push_back(f(sv[i]));
@@ -175,45 +180,40 @@ private:
     }
   }
 };
-} // namespace impl
+}  // namespace impl
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator>
-parse_vnnlib_str(const std::string &input, SolverOutput<Allocator> &output) {
+TFormula<Allocator> parse_vnnlib_str(const std::string& input, SolverOutput<Allocator>& output) {
   impl::VnnlibParser<Allocator> parser(output);
   return parser.parse(input);
 }
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator>
-parse_vnnlib(const std::string &filename, SolverOutput<Allocator> &output) {
+TFormula<Allocator> parse_vnnlib(const std::string& filename, SolverOutput<Allocator>& output) {
   std::ifstream t(filename);
   if (t.is_open()) {
     std::string input((std::istreambuf_iterator<char>(t)),
                       std::istreambuf_iterator<char>());
     return parse_vnnlib_str<Allocator>(input, output);
   } else {
+    TFormula<Allocator> empty;
     std::cerr << "File `" << filename << "` does not exists." << std::endl;
+    return empty;
   }
-  return nullptr;
 }
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator>
-parse_vnnlib_str(const std::string &input,
-                 const Allocator &allocator = Allocator()) {
+TFormula<Allocator> parse_vnnlib_str(const std::string& input, const Allocator& allocator = Allocator()) {
   SolverOutput<Allocator> output(allocator);
   return parse_vnnlib_str(input, output);
 }
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator>
-parse_vnnlib(const std::string &filename,
-             const Allocator &allocator = Allocator()) {
+TFormula<Allocator> parse_vnnlib(const std::string& filename, const Allocator& allocator = Allocator()) {
   SolverOutput<Allocator> output(allocator);
   return parse_vnnlib(filename, output);
 }
 
-} // namespace lala
+}  // namespace lala
 
 #endif

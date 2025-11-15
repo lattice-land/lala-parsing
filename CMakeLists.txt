@@ -71,7 +71,6 @@ endif()
 FetchContent_MakeAvailable(lala_core ${XCSP3PARSER} cpp_peglib)
 
 # Preparing the library
-
 if(NNV)
     set(NNV_TOOLS_DIR "${CMAKE_CURRENT_LIST_DIR}/include/lala")
     set(PROTOBUF_VERSION 3.19.2)
@@ -109,6 +108,9 @@ if(NNV)
     target_include_directories(lala_parsing INTERFACE ${PROTOBUF_DIR}/installed/include ${ONNX_DIR})
     target_sources(lala_parsing INTERFACE ${DEPS_ONNX})
     target_link_libraries(lala_parsing INTERFACE PROTOBUF_LIB)
+
+    # unit tests 
+    # add_subdirectory(test)
 endif()
 
 target_compile_options(lala_parsing INTERFACE

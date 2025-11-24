@@ -16,7 +16,6 @@
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
 #include "peglib.h"
-#include "solver_output.hpp"
 
 namespace lala {
 
@@ -32,13 +31,12 @@ class VnnlibParser {
 
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
-
-  SolverOutput<Allocator>& output;
+  F onnx_formulas;
 
  public:
-  VnnlibParser(SolverOutput<Allocator>& output) : error(false), silent(false), output(output) {}
+  VnnlibParser(F &f) : error(false), silent(false), onnx_formulas(f) {}
 
-  F parse(const std::string& input) {
+  battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
 			peg::parser parser(R"(
 				Statements    <- (DeclareVar / Assertion / Comment)+
 
@@ -53,11 +51,11 @@ class VnnlibParser {
 
 				DeclareVar    <- '(' 'declare-const' Identifier 'Real' ')'
 				Bound         <- '(' BinaryOp Identifier (Real / Integer / Identifier) ')'
-				Constraint    <- '(' LogicOp Bound+ ')'
-				Assertion     <- '(assert' Bound ')' / '(assert' '(' LogicOp Constraint+ '))'
+				Constraint    <- '(' LogicOp Bound* ')'
+				Assertion     <- '(' 'assert' Bound ')' / '(' 'assert' '(' LogicOp+ Constraint* '))'
 
-				~Comment       <- ';' [^\n\r]*
-				%whitespace   <- [ \t\r\n]*
+				~Comment       <- ';' [^\n\r]* [ \n\r\t]*
+				%whitespace   <- [ \n\r\t]*
 			)");
     assert(static_cast<bool>(parser) == true);
 
@@ -72,15 +70,19 @@ class VnnlibParser {
     parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
     parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
-    F f;
     std::cout << input.c_str() << std::endl;
-    if (parser.parse(input.c_str(), f) && !error) {
-      return f;
+    FSeq seq;
+    F vnnlib_formulas;
+    if (parser.parse(input.c_str(), vnnlib_formulas) && !error) {
+      seq.push_back(onnx_formulas);
+      seq.push_back(vnnlib_formulas);
+      return battery::make_shared<F, Allocator>(std::move(F::make_nary(AND, std::move(seq))));
     } 
     else {
       // in here, f will be empty;
-      return f;
+      return nullptr;
     }
+    // return battery::make_shared<F, Allocator>(formulas);
   }
 
  private:
@@ -113,11 +115,12 @@ class VnnlibParser {
   }
 
   F make_variable_decl(const SV& sv) {
-    auto name = std::any_cast<std::string>(sv[0]);
-    std::cout << "variable name = " << name.data() << std::endl;
-    auto ty = So(So::Real);
+    // auto name = std::any_cast<std::string>(sv[0]);
+    // std::cout << "variable name = " << name.data() << std::endl;
+    // auto ty = So(So::Real);
 
-    return F::make_exists(UNTYPED, LVar<allocator_type>(name.data()), ty);
+    // return F::make_exists(UNTYPED, LVar<allocator_type>(name.data()), ty);
+    return F::make_true();
   }
 
   F make_bound(const SV& sv) {
@@ -156,7 +159,6 @@ class VnnlibParser {
 
   F make_constraint(const SV& sv) {
     auto logic_operator = std::any_cast<std::string>(sv[0]);
-
     // We suppose the logic operator is always "and" for now.
     FSeq seq;
     for (int i = 1; i < sv.size(); ++i) {
@@ -172,7 +174,8 @@ class VnnlibParser {
     } 
     else {
       FSeq disjuncts;
-      for (int i = 0; i < sv.size(); ++i) {
+      auto logic_operator = std::any_cast<std::string>(sv[0]); // OR
+      for (int i = 1; i < sv.size(); ++i) {
         disjuncts.push_back(f(sv[i]));
       }
 
@@ -183,35 +186,22 @@ class VnnlibParser {
 }  // namespace impl
 
 template <class Allocator>
-TFormula<Allocator> parse_vnnlib_str(const std::string& input, SolverOutput<Allocator>& output) {
-  impl::VnnlibParser<Allocator> parser(output);
+battery::shared_ptr<TFormula<Allocator>, Allocator> parse_vnnlib_str(const std::string& input, TFormula<Allocator>&f) {
+  impl::VnnlibParser<Allocator> parser(f);
   return parser.parse(input);
 }
 
 template <class Allocator>
-TFormula<Allocator> parse_vnnlib(const std::string& filename, SolverOutput<Allocator>& output) {
+battery::shared_ptr<TFormula<Allocator>, Allocator> parse_vnnlib(const std::string& filename, TFormula<Allocator>&f) {
   std::ifstream t(filename);
   if (t.is_open()) {
     std::string input((std::istreambuf_iterator<char>(t)),
                       std::istreambuf_iterator<char>());
-    return parse_vnnlib_str<Allocator>(input, output);
+    return parse_vnnlib_str<Allocator>(input, f);
   } else {
-    TFormula<Allocator> empty;
     std::cerr << "File `" << filename << "` does not exists." << std::endl;
-    return empty;
   }
-}
-
-template <class Allocator>
-TFormula<Allocator> parse_vnnlib_str(const std::string& input, const Allocator& allocator = Allocator()) {
-  SolverOutput<Allocator> output(allocator);
-  return parse_vnnlib_str(input, output);
-}
-
-template <class Allocator>
-TFormula<Allocator> parse_vnnlib(const std::string& filename, const Allocator& allocator = Allocator()) {
-  SolverOutput<Allocator> output(allocator);
-  return parse_vnnlib(filename, output);
+  return nullptr;
 }
 
 }  // namespace lala

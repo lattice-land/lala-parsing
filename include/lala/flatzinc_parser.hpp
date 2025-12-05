@@ -495,6 +495,7 @@ public:
       if (name == "float_div") { return make_binary(DIV, sv); }
       if (name == "float_eq") { return make_binary(EQ, sv); }
       if (name == "float_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
+      if (name == "float_ge") { return make_binary(GEQ, sv); }
       if (name == "float_le") { return make_binary(LEQ, sv); }
       if (name == "float_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       if (name == "float_ne") { return make_binary(NEQ, sv); }

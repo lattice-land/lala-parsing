@@ -23,7 +23,7 @@ option(LALA_PARSING_BUILD_EXAMPLES "LALA_PARSING_BUILD_EXAMPLES" OFF)
 option(LALA_PARSING_BUILD_DOC "LALA_PARSING_BUILD_DOC" OFF)
 option(LOCAL_DEPS "LOCAL_DEPS" OFF)
 option(WITH_XCSP3PARSER "Add support for parsing XCSP3 .xml files" ON)
-option(NNV "Add neural network verification related parsing tools" ON)
+option(WITH_NNV "Add neural network verification related parsing tools" ON)
 
 if(MSVC)
     # XCSP3-CPP-Parser has dependencies on gcc that break MSVC
@@ -71,7 +71,7 @@ endif()
 FetchContent_MakeAvailable(lala_core ${XCSP3PARSER} cpp_peglib)
 
 # Preparing the library
-if(NNV)
+if(WITH_NNV)
     set(NNV_TOOLS_DIR "${CMAKE_CURRENT_LIST_DIR}/include/lala")
     set(PROTOBUF_VERSION 3.19.2)
     set(PROTOBUF_DEFAULT_DIR "${NNV_TOOLS_DIR}/protobuf-${PROTOBUF_VERSION}")
@@ -104,7 +104,7 @@ add_library(lala_parsing INTERFACE)
 target_include_directories(lala_parsing INTERFACE include ${LIBXML2_INCLUDE_DIR})
 target_link_libraries(lala_parsing INTERFACE lala_core ${XCSP3PARSER} cpp_peglib)
 
-if(NNV)
+if(WITH_NNV)
     target_include_directories(lala_parsing INTERFACE ${PROTOBUF_DIR}/installed/include ${ONNX_DIR})
     target_sources(lala_parsing INTERFACE ${DEPS_ONNX})
     target_link_libraries(lala_parsing INTERFACE PROTOBUF_LIB)

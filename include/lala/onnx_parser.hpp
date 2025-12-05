@@ -38,6 +38,8 @@ enum class LayerType {
   Conv,
   Flatten,
   Relu,
+  BatchNormalization, // TODO:
+  Dropout,            // TODO: identity function in inference.
   Unknown
 };
 
@@ -157,10 +159,8 @@ class OnnxParser {
     input_layer.input_width = input_width;
     for (size_t i = 0; i < input_layer.size; ++i) {
       // give variable name at the input layer.
-      // TODO: make equations to combine the input variables from vnnlib and onnx;
       input_layer.neurons.push_back("X_" + std::to_string(i));
-      auto var = F::make_exists(
-          UNTYPED, LVar<allocator_type>(input_layer.neurons[i]), So(So::Real));
+      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(input_layer.neurons[i]), So(So::Real));
       seq.push_back(var);
     }
     layers.push_back(input_layer);
@@ -210,63 +210,16 @@ class OnnxParser {
             for (const auto& attr : node.attribute()) {
               if (attr.ints_size() > 0) {
                 const std::string& attr_name = attr.name();
-                if (attr_name == "dilations") {
-                  layer.dilations = attr.ints()[0];
-                } 
-                else if (attr_name == "group") {
-                  layer.group = attr.ints()[0];
-                } 
+                if (attr_name == "dilations") { layer.dilations = attr.ints()[0]; } 
+                else if (attr_name == "group") { layer.group = attr.ints()[0]; } 
                 else if (attr_name == "kernel_shape") {
                   layer.kernel_height = attr.ints()[0];
                   layer.kernel_width = attr.ints()[0];
                 } 
-                else if (attr_name == "pads") {
-                  layer.pads = attr.ints()[0];
-                } 
-                else if (attr_name == "strides") {
-                  layer.strides = attr.ints()[0];
-                }
+                else if (attr_name == "pads") { layer.pads = attr.ints()[0]; } 
+                else if (attr_name == "strides") { layer.strides = attr.ints()[0]; }
               }
             }
-            //
-            // // conv weight 4d tensor
-            // layer.conv_weights = extract4DTensorData(tensor);
-            // layer.weights = convert4Dto2DTensor(
-            //     layer.conv_weights, layer.conv_input_height,
-            //     layer.conv_input_width, layer.strides, layer.pads);
-            //
-            // // update convolution input & output parameters
-            // layer.size = layer.weights.size();
-            // layer.output_dim = layer.conv_weights.size();
-            // layer.input_dim = layer.conv_weights[0].size();
-            // layer.kernel_height = layer.conv_weights[0][0].size();
-            // layer.kernel_width = layer.conv_weights[0][0][0].size();
-            // layer.input_channels = layer.input_dim;
-            // layer.output_channels = layer.output_dim;
-            // layer.conv_input_height = input_height;
-            // layer.conv_input_width = input_width;
-            // layer.conv_output_height = (layer.conv_input_height +
-            //                             2 * layer.pads - layer.kernel_height)
-            //                             /
-            //                                layer.strides +
-            //                            1;
-            // layer.conv_output_width =
-            //     (layer.conv_input_width + 2 * layer.pads -
-            //     layer.kernel_width) /
-            //         layer.strides +
-            //     1;
-            // input_height =
-            //     std::floor((input_height + 2 * layer.pads -
-            //                 layer.dilations * (layer.kernel_height - 1) - 1)
-            //                 /
-            //                    layer.strides +
-            //                1);
-            // input_width =
-            //     std::floor((input_width + 2 * layer.pads -
-            //                 layer.dilations * (layer.kernel_width - 1) - 1) /
-            //                    layer.strides +
-            //                1);
-
             layer.conv_weights = extract4DTensorData(tensor);
             // <output_dim, input_dim, kernel_height, kernel_weight>
             size_t output_dim = layer.conv_weights.size();
@@ -434,8 +387,7 @@ class OnnxParser {
 
         // create variable
         auto ty = So(So::Real);
-        auto var = F::make_exists(
-            UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), ty);
+        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), ty);
         seq.push_back(var);
 
         // x' = x - sub_value;
@@ -444,7 +396,7 @@ class OnnxParser {
             EQ,
             F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i])),
                            SUB,
-                           F::make_real(string_to_real(std::to_string(to_layer.sub_values[dim])))));
+                           F::make_real(to_layer.sub_values[dim], to_layer.sub_values[dim])));
         seq.push_back(f);
       }
     }
@@ -483,7 +435,7 @@ class OnnxParser {
             EQ,
             F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i])),
                            DIV,
-                           F::make_real(string_to_real(std::to_string(to_layer.div_values[dim])))));
+                           F::make_real(to_layer.div_values[dim], to_layer.div_values[dim])));
         seq.push_back(f);
       }
     }
@@ -524,7 +476,7 @@ class OnnxParser {
           EQ,
           F::make_binary(F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i])),
                         ADD,
-                        F::make_real(string_to_real(std::to_string(to_layer.biases[i])))));
+                        F::make_real(to_layer.biases[i], to_layer.biases[i])));
       seq.push_back(f);
     }
 
@@ -542,12 +494,13 @@ class OnnxParser {
       FSeq affine;
       for (size_t i = 0; i < from_layer.size; ++i) {
         affine.push_back(F::make_binary(
-            F::make_real(string_to_real(std::to_string(to_layer.weights[i][j]))),
+            F::make_real(to_layer.weights[i][j], to_layer.weights[i][j]),
             MUL,
             F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i]))));
       }
       F linearCons = F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[j])), EQ,
+          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[j])), 
+          EQ,
           F::make_nary(ADD, std::move(affine)));
       seq.push_back(linearCons);
     }
@@ -566,11 +519,11 @@ class OnnxParser {
       FSeq affine;
       for (size_t j = 0; j < from_layer.size; ++j) {
         affine.push_back(F::make_binary(
-            F::make_real(string_to_real(std::to_string(to_layer.weights[i][j]))),
+            F::make_real(to_layer.weights[i][j], to_layer.weights[i][j]),
             MUL,
             F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[j]))));
       }
-      affine.push_back(F::make_real(string_to_real(std::to_string(to_layer.biases[i]))));  // bias
+      affine.push_back(F::make_real(to_layer.biases[i], to_layer.biases[i]));  // bias
       F linearCons = F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])), 
                                     EQ,
                                     F::make_nary(ADD, std::move(affine)));
@@ -581,6 +534,7 @@ class OnnxParser {
   }
 
   F make_conv_node(const Layer& from_layer, const Layer& to_layer) {
+    // TODO: don't convert 4d tensor to 2d tensor.
     return make_gemm_node(from_layer, to_layer);
   }
 
@@ -600,11 +554,12 @@ class OnnxParser {
 
       // x' = max(0, x)
       F f = F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[i])), EQ,
+          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[i])), 
+          EQ,
           F::make_binary(
               F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i])),
               MAX,
-              F::make_real(string_to_real("0.0"))));
+              F::make_real(0.0, 0.0)));
       seq.push_back(f);
     }
 
@@ -646,6 +601,8 @@ class OnnxParser {
     for (size_t r = 0; r < num_rows; ++r) {
       for (size_t c = 0; c < num_cols; ++c) {
         data[r][c] = flat_data[r * num_cols + c];
+
+        std::cout << data[r][c] << ", ";
       }
     }
 

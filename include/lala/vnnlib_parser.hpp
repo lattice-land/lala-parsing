@@ -31,7 +31,7 @@ class VnnlibParser {
 
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
-  F onnx_formulas;
+  F &onnx_formulas;
 
  public:
   VnnlibParser(F &f) : error(false), silent(false), onnx_formulas(f) {}
@@ -76,13 +76,12 @@ class VnnlibParser {
     if (parser.parse(input.c_str(), vnnlib_formulas) && !error) {
       seq.push_back(onnx_formulas);
       seq.push_back(vnnlib_formulas);
-      return battery::make_shared<F, Allocator>(std::move(F::make_nary(AND, std::move(seq))));
+      return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(F::make_nary(AND, std::move(seq))));
     } 
     else {
       // in here, f will be empty;
       return nullptr;
     }
-    // return battery::make_shared<F, Allocator>(formulas);
   }
 
  private:
@@ -116,7 +115,6 @@ class VnnlibParser {
 
   F make_variable_decl(const SV& sv) {
     // auto name = std::any_cast<std::string>(sv[0]);
-    // std::cout << "variable name = " << name.data() << std::endl;
     // auto ty = So(So::Real);
 
     // return F::make_exists(UNTYPED, LVar<allocator_type>(name.data()), ty);

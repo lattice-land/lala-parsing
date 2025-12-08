@@ -585,7 +585,7 @@ class OnnxParser {
           F::make_binary(
               F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i])),
               MAX,
-              F::make_real(0.0, 0.0))));
+              F::make_z(0))));
     }
 
     return F::make_nary(AND, std::move(seq));

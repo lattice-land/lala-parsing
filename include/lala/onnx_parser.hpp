@@ -154,12 +154,7 @@ class OnnxParser {
     input_layer.size = input_dimensions;
     input_layer.input_height = input_height;
     input_layer.input_width = input_width;
-    for (size_t i = 0; i < input_layer.size; ++i) {
-      // give variable name at the input layer.
-      input_layer.neurons.push_back("X_" + std::to_string(i));
-      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(input_layer.neurons[i]), So(So::Real));
-      seq.push_back(var);
-    }
+    seq.push_back(std::move(make_input_node(input_layer)));
     layers.push_back(input_layer);
 
     // TODO: iterate over nodes in the network graph
@@ -183,15 +178,17 @@ class OnnxParser {
             // bias 1d tensor
             layer.biases = extract1DTensorData(tensor);
             if (layer.type == LayerType::Conv) {
-              tensor1d expanded_biases(layer.size, 0.0f);
-              for (size_t i = 0; i < layer.biases.size(); ++i) {
-                for (size_t j = 0; j < layer.conv_output_height * layer.conv_output_width; ++j) {
-                  expanded_biases.push_back(layer.biases[i]);
-                }
+              tensor1d expanded_biases;
+              expanded_biases.reserve(layer.size());
+              size_t spatial_size = layer.conv_output_height * layer.conv_output_width;
+              for (const auto &bias : layer.biases) {
+                expanded_biases.insert(expanded_biases.end(), spatial_size, bias);
               }
               layer.biases = expanded_biases;
             } 
-            else { layer.size = layer.biases.size(); }
+            else if (layer.type == LayerType::Gemm || layer.type == LayerType::Add) { 
+              layer.size = layer.biases.size(); 
+            }
           } 
           else if (tensor.dims().size() == 2) {
             // weight 2d tensor
@@ -356,6 +353,17 @@ class OnnxParser {
       }
     }
     return;
+  }
+
+  F make_input_node(Layer &input_layer) {
+    FSeq seq; 
+    for (size_t i = 0; i < input_layer.size; ++i) { 
+      input_layer.neurons.push_back("X_" + std::to_string(i));
+      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(input_layer.neurons[i]), So(So::Real));
+      seq.push_back(std::move(var));
+    }
+
+    return F::make_nary(AND, std::move(seq));
   }
 
   F make_sub_node(const Layer& from_layer, const Layer& to_layer) {

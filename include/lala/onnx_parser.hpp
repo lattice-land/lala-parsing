@@ -179,10 +179,12 @@ class OnnxParser {
             layer.biases = extract1DTensorData(tensor);
             if (layer.type == LayerType::Conv) {
               tensor1d expanded_biases;
-              expanded_biases.reserve(layer.size());
+              expanded_biases.reserve(layer.size);
               size_t spatial_size = layer.conv_output_height * layer.conv_output_width;
-              for (const auto &bias : layer.biases) {
-                expanded_biases.insert(expanded_biases.end(), spatial_size, bias);
+              for (size_t i = 0; i < layer.biases.size(); ++i) {
+                for (size_t j = 0; j < spatial_size; ++j) {
+                  expanded_biases.emplace_back(layer.biases[i]);
+                }
               }
               layer.biases = expanded_biases;
             } 

@@ -148,6 +148,7 @@ class OnnxParser {
     FSeq seq;
     // Create an input layer.
     battery::vector<Layer> layers;
+    layers.reserve(graph.node_size());
     Layer input_layer;
     input_layer.id = layers.size();
     input_layer.type = LayerType::Input;
@@ -155,7 +156,7 @@ class OnnxParser {
     input_layer.input_height = input_height;
     input_layer.input_width = input_width;
     seq.push_back(std::move(make_input_node(input_layer)));
-    layers.push_back(input_layer);
+    layers.emplace_back(input_layer);
 
     // TODO: iterate over nodes in the network graph
     for (const auto& node : graph.node()) {
@@ -177,103 +178,23 @@ class OnnxParser {
           if (tensor.dims().size() == 1) {
             // bias 1d tensor
             layer.biases = extract1DTensorData(tensor);
-            if (layer.type == LayerType::Conv) {
-              tensor1d expanded_biases;
-              expanded_biases.reserve(layer.size);
-              size_t spatial_size = layer.conv_output_height * layer.conv_output_width;
-              for (size_t i = 0; i < layer.biases.size(); ++i) {
-                for (size_t j = 0; j < spatial_size; ++j) {
-                  expanded_biases.emplace_back(layer.biases[i]);
-                }
-              }
-              layer.biases = expanded_biases;
-            } 
-            else if (layer.type == LayerType::Gemm || layer.type == LayerType::Add) { 
-              layer.size = layer.biases.size(); 
-            }
+            updateBiasTensor(layer);
           } 
           else if (tensor.dims().size() == 2) {
             // weight 2d tensor
             layer.weights = extract2DTensorData(tensor);
-
-            // <output_dimensions, input_dimensions>
-            layer.size = layer.weights[0].size();
+            layer.size = layer.weights[0].size();  // <output_dimensions, input_dimensions>
           } 
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Conv) {
-            // Extract the attributes in convolutional layer.
-            for (const auto& attr : node.attribute()) {
-              if (attr.ints_size() > 0) {
-                const std::string& attr_name = attr.name();
-                if (attr_name == "dilations") { layer.dilations = attr.ints()[0]; } 
-                else if (attr_name == "group") { layer.group = attr.ints()[0]; } 
-                else if (attr_name == "kernel_shape") {
-                  layer.kernel_height = attr.ints()[0];
-                  layer.kernel_width = attr.ints()[0];
-                } 
-                else if (attr_name == "pads") { layer.pads = attr.ints()[0]; } 
-                else if (attr_name == "strides") { layer.strides = attr.ints()[0]; }
-              }
-            }
+            extractIntAttributes(node, layer);
             layer.conv_weights = extract4DTensorData(tensor);
-            // <output_dim, input_dim, kernel_height, kernel_weight>
-            // size_t output_dim = layer.conv_weights.size();
-            // size_t input_dim = layer.conv_weights[0].size();
-            // size_t kernel_height = layer.conv_weights[0][0].size();
-            // size_t kernel_width = layer.conv_weights[0][0][0].size();
-
-            // convert 4d tensor to 2d tensor
-            layer.input_channels = layer.conv_weights[0].size();
-            layer.output_channels = layer.conv_weights.size();
-            layer.conv_input_height = input_height;
-            layer.conv_input_width = input_width;
-            layer.kernel_height = layer.conv_weights[0][0].size();
-            layer.kernel_width = layer.conv_weights[0][0][0].size();
-            layer.conv_output_height = (input_height + 2 * layer.pads - layer.kernel_height) / layer.strides + 1;
-            layer.conv_output_width = (input_width + 2 * layer.pads - layer.kernel_width) / layer.strides + 1;
-            // layer.weights = convert4Dto2DTensor(
-            //     layer.conv_weights, layer.conv_input_height,
-            //     layer.conv_input_width, layer.strides, layer.pads
-            //   );
-            
-            // layer.size = layer.weights.size();
-            layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
-            std::cout << "convolutional layer output size = " << layer.size << std::endl;
-            input_height = std::floor((layer.conv_input_height + 2 * layer.pads - layer.dilations * (layer.kernel_height - 1) - 1) / layer.strides + 1);
-            input_width = std::floor((layer.conv_input_width + 2 * layer.pads - layer.dilations * (layer.kernel_width - 1) - 1) / layer.strides + 1);
+            updateConvLayerInfo(layer, input_height, input_width);
           }
         } 
         else if (layer.type == LayerType::Sub || layer.type == LayerType::Div) {
           // Finding the constant in Sub/Div node
           if (producer_map.find(input_name) != producer_map.end()) {
-            const onnx::NodeProto* producer = producer_map[input_name];
-            for (const auto& attr : producer->attribute()) {
-              if (attr.has_t()) {
-                // Attribute contains a tensor
-                const onnx::TensorProto& tensor = attr.t();
-
-                if (tensor.data_type() == onnx::TensorProto::FLOAT) {
-                  if (!tensor.raw_data().empty()) {
-                    const std::string& raw = tensor.raw_data();
-                    const float* data = reinterpret_cast<const float*>(raw.data());
-                    size_t numel = raw.size() / sizeof(float);
-                    for (size_t i = 0; i < numel; i++) {
-                      if (layer.type == LayerType::Sub)
-                        layer.sub_values.push_back(data[i]);
-                      else if (layer.type == LayerType::Div)
-                        layer.div_values.push_back(data[i]);
-                    }
-                  }
-                }
-              } 
-              else if (attr.floats_size() > 0) {
-                for (auto f : attr.floats()) {
-                  if (layer.type == LayerType::Sub)
-                    layer.sub_values.push_back(f);
-                  else if (layer.type == LayerType::Div)
-                    layer.div_values.push_back(f);
-                }
-              }
-            }
+            extractFloatAttributes(producer_map[input_name], layer);
           }
 
           layer.size = layers[0].size;
@@ -298,7 +219,7 @@ class OnnxParser {
       seq.push_back(std::move(make_node(layers.back(), layer)));
 
       // store into list of layers
-      layers.push_back(layer);
+      layers.emplace_back(layer);
     }
 
     google::protobuf::ShutdownProtobufLibrary();
@@ -627,6 +548,51 @@ class OnnxParser {
     return F::make_true();
   }
 
+  void extractIntAttributes(const onnx::NodeProto& node, Layer &layer) {
+    for (const auto& attr : node.attribute()) {
+      if (attr.ints_size() > 0) {
+        const std::string& attr_name = attr.name();
+        if (attr_name == "dilations") { layer.dilations = attr.ints()[0]; }
+        else if (attr_name == "group") { layer.group = attr.ints()[0]; }
+        else if (attr_name == "kernel_shape") {
+          layer.kernel_height = attr.ints()[0];
+          layer.kernel_width = attr.ints()[0];
+        }
+        else if (attr_name == "pads") { layer.pads = attr.ints()[0]; }
+        else if (attr_name == "strides") { layer.strides = attr.ints()[0]; }
+      }
+    }
+
+    return;
+  }
+
+  void extractFloatAttributes(const onnx::NodeProto* node, Layer &layer) {
+    for (const auto& attr : node->attribute()) {
+      if (attr.has_t()) {
+        const onnx::TensorProto& tensor = attr.t();
+        if (tensor.data_type() == onnx::TensorProto::FLOAT) {
+          if (!tensor.raw_data().empty()) {
+            const std::string& raw = tensor.raw_data();
+            const float* data = reinterpret_cast<const float*>(raw.data());
+            size_t numel = raw.size() / sizeof(float);
+            for (size_t i = 0; i < numel; ++i) {
+              if (layer.type == LayerType::Sub) { layer.sub_values.push_back(data[i]); }
+              else if (layer.type == LayerType::Div) { layer.div_values.push_back(data[i]); }
+            }
+          }
+        }
+      }
+      else if (attr.floats_size() > 0) {
+        for (const auto& f : attr.floats()) {
+          if (layer.type == LayerType::Sub) { layer.sub_values.push_back(f); }
+          else if (layer.type == LayerType::Div) { layer.div_values.push_back(f); }
+        }
+      }
+    } 
+
+    return;
+  }
+
   tensor1d extract1DTensorData(const onnx::TensorProto& tensor) {
     tensor1d data;
 
@@ -643,6 +609,43 @@ class OnnxParser {
     }
 
     return data;
+  }
+
+  void updateBiasTensor(Layer &layer) {
+    if (layer.type == LayerType::Gemm || layer.type == LayerType::Add) {
+      layer.size = layer.biases.size();
+    }
+    else if (layer.type == LayerType::Conv) {
+      tensor1d expanded_biases; 
+      expanded_biases.reserve(layer.size);
+      size_t spatial_size = layer.conv_output_height * layer.conv_output_width;
+      for (size_t i = 0; i < layer.biases.size(); ++i) {
+        for (size_t j = 0; j < spatial_size; ++j) {
+          expanded_biases.emplace_back(layer.biases[i]);
+        }
+      }
+      layer.biases = expanded_biases;
+    }
+
+    return;
+  }
+
+  void updateConvLayerInfo(Layer &layer, size_t &input_height, size_t &input_width) {
+    // <output_dim, input_dim, kernel_height, kernel_weight>
+    layer.output_channels = layer.conv_weights.size();
+    layer.input_channels = layer.conv_weights[0].size();
+    layer.conv_input_height = input_height;
+    layer.conv_input_width = input_width;
+    layer.kernel_height = layer.conv_weights[0][0].size();
+    layer.kernel_width = layer.conv_weights[0][0][0].size();
+    layer.conv_output_height = (input_height + 2 * layer.pads - layer.kernel_height) / layer.strides + 1;
+    layer.conv_output_width = (input_width + 2 * layer.pads - layer.kernel_width) / layer.strides + 1;
+    
+    layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
+    input_height = std::floor((layer.conv_input_height + 2 * layer.pads - layer.dilations * (layer.kernel_height - 1) - 1) / layer.strides + 1);
+    input_width = std::floor((layer.conv_input_width + 2 * layer.pads - layer.dilations * (layer.kernel_width - 1) - 1) / layer.strides + 1);
+  
+    return;
   }
 
   tensor2d extract2DTensorData(const onnx::TensorProto& tensor) {

@@ -38,9 +38,9 @@ enum class LayerType {
   Conv,
   Flatten,
   Relu,
-  MaxPool,            // TODO: load its int attributes.
-  BatchNormalization, // TODO: load its float attributes.
-  Dropout,            // // TODO: identity function in inference.
+  MaxPool,           
+  BatchNormalization, 
+  Dropout,            
   Unknown
 };
 
@@ -49,6 +49,17 @@ struct Layer {
   size_t id;
   LayerType type;
   battery::vector<std::string> neurons;
+  battery::vector<size_t> source_layers;
+
+  // BatchNormalization
+  float epsilon; 
+  tensor1d scale; 
+  tensor1d B;
+  tensor1d input_mean;
+  tensor1d input_var;
+
+  // for leaky relu, in GNN, we will need this parameter.
+  float alpha; 
 
   tensor1d sub_values;
   tensor1d div_values;
@@ -92,13 +103,12 @@ class OnnxParser {
   using So = Sort<allocator_type>;
   using FSeq = typename F::Sequence;
 
+  battery::vector<Layer> layers;
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
 
-  SolverOutput<Allocator>& output;
-
  public:
-  OnnxParser(SolverOutput<Allocator>& output) : error(false), silent(false), output(output) {}
+  OnnxParser() : error(false), silent(false) {}
 
   F parse(const std::string& onnx_model_directory) {
     F empty;
@@ -118,8 +128,7 @@ class OnnxParser {
     const onnx::GraphProto& graph = model.graph();
     std::cout << "onnx model name: " << graph.name() << std::endl;
     std::cout << "number of nodes: " << graph.node_size() << std::endl;
-    std::cout << "number of initializers (weights/biases): "
-              << graph.initializer_size() << std::endl;
+    std::cout << "number of initializers (weights/biases): " << graph.initializer_size() << std::endl;
 
     // Create a map from tensor name to TensorProto for fast lookup
     std::unordered_map<std::string, onnx::TensorProto> tensor_map;
@@ -147,7 +156,6 @@ class OnnxParser {
 
     FSeq seq;
     // Create an input layer.
-    battery::vector<Layer> layers;
     layers.reserve(graph.node_size());
     Layer input_layer;
     input_layer.id = layers.size();
@@ -159,11 +167,13 @@ class OnnxParser {
     layers.emplace_back(input_layer);
 
     // TODO: iterate over nodes in the network graph
+    std::unordered_map<std::string, size_t> layer_index_map;
     for (const auto& node : graph.node()) {
       Layer layer;
       layer.id = layers.size();
       layer.type = setLayerType(node);
       std::cout << "Node: " << node.name() << "| OpType: " << node.op_type() << std::endl;
+      layer_index_map[node.name()] = layer.id;
       if (layer.type == LayerType::Unknown) {
         std::cerr << "Unknown layer type." << std::endl;
         return empty;
@@ -186,27 +196,68 @@ class OnnxParser {
             layer.size = layer.weights[0].size();  // <output_dimensions, input_dimensions>
           } 
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Conv) {
+            std::cout << "extracting conv info ...\n";
+            continue;
             extractIntAttributes(node, layer);
             layer.conv_weights = extract4DTensorData(tensor);
-            updateConvLayerInfo(layer, input_height, input_width);
+            updateConvMaxPoolLayerInfo(layer, input_height, input_width);
           }
+          else { std::cout << "Unknown behavior!" << std::endl; }
         } 
-        else if (layer.type == LayerType::Sub || layer.type == LayerType::Div) {
-          // Finding the constant in Sub/Div node
+        else if (layer.type == LayerType::Sub) {
+          // Finding the constant in Sub node
           if (producer_map.find(input_name) != producer_map.end()) {
-            extractFloatAttributes(producer_map[input_name], layer);
+            extractConstant(producer_map[input_name], layer.sub_values);
           }
 
           layer.size = layers[0].size;
           layer.input_height = layers[0].input_height;
           layer.input_width = layers[0].input_width;
+          layer.source_layers.push_back(layer_index_map[input_name]);
         } 
-        else if (layer.type == LayerType::Constant) { continue; } 
-        else if (layer.type == LayerType::Flatten) { layer.size = layers[layers.size() - 1].size; } 
-        else if (layer.type == LayerType::Relu) { layer.size = layers[layers.size() - 1].size; }
-        else if (layer.type == LayerType::MaxPool) { continue; } // TODO: 
-        else if (layer.type == LayerType::Dropout) { layer.size = layers[layers.size() - 1].size; }
-        else if (layer.type == LayerType::BatchNormalization) { continue; } // TODO:
+        else if (layer.type == LayerType::Div) {
+          // Finding the constant in Div node
+          if (producer_map.find(input_name) != producer_map.end()) {
+            extractConstant(producer_map[input_name], layer.div_values);
+          }
+
+          layer.size = layers[0].size; 
+          layer.input_height = layers[0].input_height;
+          layer.input_width = layers[0].input_width;
+          layer.source_layers.push_back(layer_index_map[input_name]);
+        }
+        else if (layer.type == LayerType::Flatten) { 
+          layer.size = layers[layers.size() - 1].size; 
+          layer.source_layers.push_back(layer_index_map[input_name]);
+        } 
+        else if (layer.type == LayerType::Relu) { 
+          layer.size = layers[layers.size() - 1].size; 
+          layer.source_layers.push_back(layer_index_map[input_name]);
+        }
+        else if (layer.type == LayerType::MaxPool) { 
+          updateConvMaxPoolLayerInfo(layer, input_height, input_width); 
+          layer.source_layers.push_back(layer_index_map[input_name]);
+        } 
+        else if (layer.type == LayerType::Gemm) { layer.source_layers.push_back(layer_index_map[input_name]); }
+        else if (layer.type == LayerType::MatMul) { layer.source_layers.push_back(layer_index_map[input_name]); }
+        else if (layer.type == LayerType::Conv) { layer.source_layers.push_back(layer_index_map[input_name]); }
+        else if (layer.type == LayerType::Add) { 
+          layer.size = layers[layers.size() - 1].size;
+          layer.source_layers.push_back(layer_index_map[input_name]); 
+        }  
+        else if (layer.type == LayerType::Dropout) { 
+          layer.size = layers[layers.size() - 1].size; 
+          layer.source_layers.push_back(layer_index_map[input_name]);
+        }
+        else if (layer.type == LayerType::BatchNormalization){ 
+          layer.size = layers[layers.size() - 1].size; 
+          layer.source_layers.push_back(layer_index_map[input_name]);
+        } 
+        else { 
+          std::cerr << "Unknown layer type." << std::endl; 
+          error = true;
+          return F::make_false();
+        }
       }
 
       // The outputs of the node
@@ -216,7 +267,7 @@ class OnnxParser {
 
       // create variables at current layer then build constraint for this node/layer
       make_neurons(layer, graph.output()[0].name() == node.output()[0].c_str());
-      seq.push_back(std::move(make_node(layers.back(), layer)));
+      seq.push_back(std::move(make_node(layer)));
 
       // store into list of layers
       layers.emplace_back(layer);
@@ -246,19 +297,19 @@ class OnnxParser {
     else { return LayerType::Unknown; }
   }
 
-  F make_node(const Layer& from_layer, const Layer& to_layer) {
-    if (to_layer.type == LayerType::Sub) { return make_sub_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Div) { return make_div_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Constant) { return make_constant_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Flatten) { return make_flatten_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::MatMul) { return make_matmul_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Add) { return make_add_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Gemm) { return make_gemm_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Conv) { return make_conv_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::Relu) { return make_relu_node(from_layer, to_layer); } 
-    else if (to_layer.type == LayerType::MaxPool) { return make_maxpool_node(from_layer, to_layer); }
-    else if (to_layer.type == LayerType::Dropout) { return make_dropout_node(from_layer, to_layer); }
-    else if (to_layer.type == LayerType::BatchNormalization) { return make_batch_normalization_node(from_layer, to_layer); }
+  F make_node(const Layer& layer) {
+    if (layer.type == LayerType::Sub) { return make_sub_node(layer); } 
+    else if (layer.type == LayerType::Div) { return make_div_node(layer); } 
+    else if (layer.type == LayerType::Constant) { return make_constant_node(layer); } 
+    else if (layer.type == LayerType::Flatten) { return make_flatten_node(layer); } 
+    else if (layer.type == LayerType::MatMul) { return make_matmul_node(layer); } 
+    else if (layer.type == LayerType::Add) { return make_add_node(layer); } 
+    else if (layer.type == LayerType::Gemm) { return make_gemm_node(layer); } 
+    else if (layer.type == LayerType::Conv) { return make_conv_node(layer); } 
+    else if (layer.type == LayerType::Relu) { return make_relu_node(layer); } 
+    else if (layer.type == LayerType::MaxPool) { return make_maxpool_node(layer); }
+    else if (layer.type == LayerType::Dropout) { return make_dropout_node(layer); }
+    else if (layer.type == LayerType::BatchNormalization) { return make_batch_normalization_node(layer); }
     else { return F::make_false(); }
   }
 
@@ -289,128 +340,137 @@ class OnnxParser {
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_sub_node(const Layer& from_layer, const Layer& to_layer) {
-    FSeq seq;
-
-    if (to_layer.sub_values.size() == 0) {
-      for (size_t i = 0; i < to_layer.size; ++i) {
+  F make_sub_node(const Layer& layer) {
+    assert(layer.source_layers.size() == 1);
+    FSeq seq; 
+    if (layer.sub_values.size() == 0) {
+      for (size_t i = 0; i < layer.size; ++i) {
         // create variable
-        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
         seq.push_back(std::move(var));
 
         seq.push_back(F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])),
-            EQ,
-            F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i]))));
+          F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
+          EQ,
+          F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))));
       }
-    } 
+    }
     else {
-      for (size_t i = 0; i < to_layer.size; ++i) {
-        int dim = i / (to_layer.input_height * to_layer.input_width);
+      for (size_t i = 0; i < layer.size; ++i) {
+        int dim = i / (layer.input_height * layer.input_width);
 
-        // create variable
-        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
-        seq.push_back(std::move(var));
+        // create variable 
+        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
 
         // x' = x - sub_value;
         seq.push_back(F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])),
+            F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
             EQ,
-            std::move(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i])),
+            std::move(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])),
                            SUB,
-                           F::make_real(to_layer.sub_values[dim], to_layer.sub_values[dim])))));
+                           F::make_real(layer.sub_values[dim], layer.sub_values[dim])))));
       }
     }
-
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_div_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_div_node(const Layer& layer) {
+    assert(layer.source_layers.size() == 1);
     FSeq seq;
-    if (to_layer.div_values.size() == 0) {
-      for (size_t i = 0; i < to_layer.size; ++i) {
+    if (layer.div_values.size() == 0) {
+      for (size_t i = 0; i < layer.size; ++i) {
         // create variable
-        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
         seq.push_back(std::move(var));
 
         seq.push_back(F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])),
+            F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
             EQ,
-            F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i]))));
+            F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))));
       }
     } 
     else {
-      for (size_t i = 0; i < to_layer.size; ++i) {
-        int dim = i / (to_layer.input_height * to_layer.input_width);
+      for (size_t i = 0; i < layer.size; ++i) {
+        int dim = i / (layer.input_height * layer.input_width);
 
         // create variable
-        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
         seq.push_back(std::move(var));
 
         // x' = x / div_value;
         seq.push_back(F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])),
+            F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
             EQ,
-            std::move(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i])),
+            std::move(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])),
                            DIV,
-                           F::make_real(to_layer.div_values[dim], to_layer.div_values[dim])))));
+                           F::make_real(layer.div_values[dim], layer.div_values[dim])))));
       }
     }
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_flatten_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_flatten_node(const Layer& layer) {
+    assert(layer.source_layers.size() == 1);
     // we have flatten input as a vector. we do not need to do additional transformation here.
     FSeq seq;
-    for (size_t i = 0; i < to_layer.size; ++i) {
+    for (size_t i = 0; i < layer.size; ++i) {
       // create variable
-      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
 
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[i])), 
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])), 
           EQ,
-          F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i]))));
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))));
     }
 
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_add_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_add_node(const Layer& layer) {
+    assert(layer.source_layers.size() >= 1);
     FSeq seq;
-    for (size_t i = 0; i < to_layer.size; ++i) {
-      // create variable
-      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+    for (size_t i = 0; i < layer.size; ++i) {
+      // create variable 
+      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
 
-      // x' = x + bias
+      FSeq rhs; 
+      for (size_t sidx = 0; sidx < layer.source_layers.size(); ++sidx) {
+        // not sure which one is correct yet.
+        // for (size_t j = 0; j < layers[layer.source_layers[sidx]].size; ++j){
+        //   rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[j])));
+        // }
+        rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[i])));
+      }
+      rhs.push_back(F::make_real(layer.biases[i], layer.biases[i]));
+
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[i])),
-          EQ,
-          std::move(F::make_binary(F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i])),
-                        ADD,
-                        F::make_real(to_layer.biases[i], to_layer.biases[i])))));
+        F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
+        EQ, 
+        F::make_nary(ADD, std::move(rhs))));
     }
 
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_matmul_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_matmul_node(const Layer& layer) {
+    assert(layer.source_layers.size() == 1);
     FSeq seq;
-    for (size_t j = 0; j < to_layer.size; ++j) {
+    for (size_t j = 0; j < layer.size; ++j) {
       // create variable
-      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(to_layer.neurons[j]), So(So::Real));
+      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(layer.neurons[j]), So(So::Real));
       seq.push_back(std::move(var));
 
       FSeq affine;
-      for (size_t i = 0; i < from_layer.size; ++i) {
+      for (size_t i = 0; i < layers[layer.source_layers[0]].size; ++i) {
         affine.push_back(F::make_binary(
-            F::make_real(to_layer.weights[i][j], to_layer.weights[i][j]),
+            F::make_real(layer.weights[i][j], layer.weights[i][j]),
             MUL,
-            F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i]))));
+            F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))));
       }
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[j])), 
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[j])), 
           EQ,
           F::make_nary(ADD, std::move(affine))));
     }
@@ -418,137 +478,209 @@ class OnnxParser {
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_gemm_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_gemm_node(const Layer& layer) {
+    assert (layer.source_layers.size() == 1);
     FSeq seq;
-    for (size_t i = 0; i < to_layer.size; ++i) {
+    for (size_t i = 0; i < layer.size; ++i) {
       // create variable
-      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
 
       FSeq affine;
-      for (size_t j = 0; j < from_layer.size; ++j) {
+      for (size_t j = 0; j < layers[layer.source_layers[0]].size; ++j) {
         affine.push_back(F::make_binary(
-            F::make_real(to_layer.weights[i][j], to_layer.weights[i][j]),
+            F::make_real(layer.weights[i][j], layer.weights[i][j]),
             MUL,
-            F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[j]))));
+            F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[j]))));
       }
-      affine.push_back(F::make_real(to_layer.biases[i], to_layer.biases[i]));  // bias
-      seq.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])), 
+      affine.push_back(F::make_real(layer.biases[i], layer.biases[i]));  // bias
+      seq.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])), 
                                     EQ,
                                     F::make_nary(ADD, std::move(affine))));
     }
 
     return F::make_nary(AND, std::move(seq));
   }
-
-  F make_conv_node(const Layer& from_layer, const Layer& to_layer) {
-    const size_t input_size = to_layer.input_channels * to_layer.conv_input_height * to_layer.conv_input_width;
-    const size_t output_size = to_layer.output_channels * to_layer.conv_output_height * to_layer.conv_output_width;
+  
+  F make_conv_node(const Layer& layer) {
+    // This function is super slow and takes a lot of memory space, not sure the reason yet.
+    assert(layer.source_layers.size() == 1);
+    const size_t input_size = layer.input_channels * layer.conv_input_height * layer.conv_input_width;
+    const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
 
     FSeq seq;
+    seq.reserve(output_size * 2);
     size_t row = 0;
-    for (size_t oc = 0; oc < to_layer.output_channels; ++oc) {
-      for (size_t oh = 0; oh < to_layer.conv_output_height; ++oh) {
-        for (size_t ow = 0; ow < to_layer.conv_output_width; ++ow) {
+    for (size_t oc = 0; oc < layer.output_channels; ++oc) {
+      for (size_t oh = 0; oh < layer.conv_output_height; ++oh) {
+        for (size_t ow = 0; ow < layer.conv_output_width; ++ow) {
+#ifndef NDEBUG
           // bound check for now (defensive)
           if (row >= output_size) {
             std::cerr << "ERROR: row >= output_size: row=" << row << "output_size=" << output_size << std::endl;
             assert(false);
           }
-
+#endif
           // create variable
-          auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[row]), So(So::Real));
-          seq.push_back(std::move(var));
+          auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[row]), So(So::Real));
+          seq.emplace_back(std::move(var));
 
           FSeq affine;
-          for (size_t ic = 0; ic < to_layer.input_channels; ++ic) {
-            for (size_t kh = 0; kh < to_layer.kernel_height; ++kh) {
-              for (size_t kw = 0; kw < to_layer.kernel_width; ++kw) {
+          affine.reserve(layer.input_channels * layer.kernel_height * layer.kernel_width + 1);
+          for (size_t ic = 0; ic < layer.input_channels; ++ic) {
+            for (size_t kh = 0; kh < layer.kernel_height; ++kh) {
+              for (size_t kw = 0; kw < layer.kernel_width; ++kw) {
                 // use signed integers for intermediate coordinates. 
-                int ih = static_cast<int>(oh * to_layer.strides) + static_cast<int>(kh) - static_cast<int>(to_layer.pads);
-                int iw = static_cast<int>(ow * to_layer.strides) + static_cast<int>(kw) - static_cast<int>(to_layer.pads); 
+                int ih = oh * layer.strides + kh - layer.pads;
+                int iw = ow * layer.strides + kw - layer.pads; 
 
-                if (ih >= 0 && ih < static_cast<int>(to_layer.conv_input_height) && iw >= 0 && iw < static_cast<int>(to_layer.conv_input_width)) {
-                  size_t col = ic * (to_layer.conv_input_height * to_layer.conv_input_width) + static_cast<size_t>(ih) * to_layer.conv_input_width + static_cast<size_t>(iw);
-
+                if (ih >= 0 && ih < layer.conv_input_height && iw >= 0 && iw < layer.conv_input_width) {
+                  size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
+#ifndef NDEBUG
                   // defensive check for col bounds
                   if (col >= input_size) {
                     std::cerr << "ERROR: computed col out of range: col=" << col << " input_size=" << input_size 
                               << " (oc,ic,oh,ow,kh,kw)=(" << oc << "," << ic << "," << oh << "," << ow << "," << kh << "," << kw << ")\n";
                     assert(false);                    
                   }
-
-                  affine.push_back(F::make_binary(
-                    F::make_real(to_layer.conv_weights[oc][ic][kh][kw], to_layer.conv_weights[oc][ic][kh][kw]),
+#endif 
+                  affine.emplace_back(F::make_binary(
+                    F::make_real(layer.conv_weights[oc][ic][kh][kw], layer.conv_weights[oc][ic][kh][kw]),
                     MUL, 
-                    F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[col]))));
+                    F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[col]))));
                 }
               }
             }
           }
-          affine.push_back(F::make_real(to_layer.biases[row], to_layer.biases[row]));
-          seq.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[row])), EQ, F::make_nary(ADD, std::move(affine))));
+          affine.emplace_back(F::make_real(layer.biases[row], layer.biases[row]));
+          seq.emplace_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[row])), EQ, F::make_nary(ADD, std::move(affine))));
           ++row;
         }
       }
     }
-    std::cout << "number of conv constraitns = " << row << std::endl;
-    return F::make_nary(AND, seq);
+
+    return F::make_nary(AND, std::move(seq));
   }
 
-  F make_constant_node(const Layer& from_layer, const Layer& to_layer) {
-    // We do actually create constant node,
-    // it would be contained in sub/div node.
-    return F::make_true();
-  }
+  // We do actually create constant node,
+  // it would be contained in sub/div node.
+  F make_constant_node(const Layer& layer) { return F::make_true(); }
 
-  F make_relu_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_relu_node(const Layer& layer) {
+    assert(layer.source_layers.size() == 1);
     FSeq seq;
-    for (size_t i = 0; i < to_layer.size; ++i) {
+    for (size_t i = 0; i < layer.size; ++i) {
       // create variable
-      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
 
       // x' = max(0, x)
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(to_layer.neurons[i])), 
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])), 
           EQ,
           F::make_binary(
-              F::make_lvar(UNTYPED,LVar<allocator_type>(from_layer.neurons[i])),
+              F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])),
               MAX,
               F::make_z(0))));
+    }
+    return F::make_nary(AND, std::move(seq));
+  }
+
+  F make_maxpool_node(const Layer& layer) {
+    // This function is super slow and takes a lot of memory space, not sure the reason yet.
+    assert(layer.source_layers.size() == 1);
+    const size_t input_size = layer.input_channels * layer.conv_input_height * layer.conv_input_width;
+    const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
+
+    FSeq seq;
+    seq.reserve(output_size * 2);
+    size_t row = 0;
+    for (size_t oc = 0; oc < layer.output_channels; ++oc) {
+      for (size_t oh = 0; oh < layer.conv_output_height; ++oh) {
+        for (size_t ow = 0; ow < layer.conv_output_width; ++ow) {
+#ifndef NDEBUG
+          // bound check for now (defensive)
+          if (row >= output_size) {
+            std::cerr << "ERROR: row >= output_size: row=" << row << "output_size=" << output_size << std::endl;
+            assert(false);
+          }
+#endif
+          // create variable
+          auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[row]), So(So::Real));
+          seq.emplace_back(std::move(var));
+
+          FSeq max_seq;
+          for (size_t ic = 0; ic < layer.input_channels; ++ic) {
+            for (size_t kh = 0; kh < layer.kernel_height; ++kh) {
+              for (size_t kw = 0; kw < layer.kernel_width; ++kw) {
+                // use signed integers for intermediate coordinates. 
+                int ih = oh * layer.strides + kh - layer.pads;
+                int iw = ow * layer.strides + kw - layer.pads; 
+
+                if (ih >= 0 && ih < layer.conv_input_height && iw >= 0 && iw < layer.conv_input_width) {
+                  size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
+#ifndef NDEBUG
+                  // defensive check for col bounds
+                  if (col >= input_size) {
+                    std::cerr << "ERROR: computed col out of range: col=" << col << " input_size=" << input_size 
+                              << " (oc,ic,oh,ow,kh,kw)=(" << oc << "," << ic << "," << oh << "," << ow << "," << kh << "," << kw << ")\n";
+                    assert(false);                    
+                  }
+#endif 
+                  max_seq.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[col])));
+                }
+              }
+            }
+          }
+          seq.emplace_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[row])), EQ, F::make_nary(MAX, std::move(max_seq))));
+          ++row;
+        }
+      }
     }
 
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_maxpool_node(const Layer& from_layer, const Layer& to_layer) {
-    // todo:
-    return F::make_true();
-  }
-
-  F make_dropout_node(const Layer& from_layer, const Layer& to_layer) {
+  F make_dropout_node(const Layer& layer) {
+    assert (layer.source_layers.size() == 1);
     FSeq seq;
-    for (size_t i = 0; i < to_layer.size; ++i) {
-      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(to_layer.neurons[i]), So(So::Real));
+    for (size_t i = 0; i < layer.size; ++i) {
+      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
       
       // x = y;
       seq.push_back(F::make_binary(
-        F::make_lvar(UNTYPED, LVar<allocator_type>(to_layer.neurons[i])),
+        F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
         EQ, 
-        F::make_lvar(UNTYPED, LVar<allocator_type>(from_layer.neurons[i]))));
+        F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))));
     }
 
     return F::make_nary(AND, std::move(seq));
   }
 
-  F make_batch_normalization_node(const Layer& from_layer, const Layer& to_layer) {
-    // TODO: 
-    return F::make_true();
+  F make_batch_normalization_node(const Layer& layer) {
+    assert(layer.source_layers.size() == 1);
+    FSeq seq;
+    for (size_t i = 0; i < layer.size; ++i) {
+      auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
+      seq.push_back(std::move(var));
+
+      FSeq batch_norm;
+      batch_norm.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])), 
+                          MUL, 
+                          F::make_real(1 / sqrt(layer.input_var[i] + layer.epsilon) * layer.scale[i], 1 / sqrt(layer.input_var[i] + layer.epsilon) * layer.scale[i])));
+      batch_norm.push_back(F::make_real(layer.input_mean[i] / sqrt(layer.input_var[i] + layer.epsilon) * layer.scale[i] - layer.biases[i], layer.input_mean[i] / sqrt(layer.input_var[i] + layer.epsilon) * layer.scale[i] - layer.biases[i]));
+      
+      seq.push_back(F::make_binary(
+        F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
+        EQ, 
+        F::make_nary(ADD, std::move(batch_norm))   
+      ));
+    }
+    return F::make_nary(AND, std::move(seq));
   }
 
-  void extractIntAttributes(const onnx::NodeProto& node, Layer &layer) {
+  void extractIntAttributes(const onnx::NodeProto& node, Layer& layer) {
     for (const auto& attr : node.attribute()) {
       if (attr.ints_size() > 0) {
         const std::string& attr_name = attr.name();
@@ -560,13 +692,27 @@ class OnnxParser {
         }
         else if (attr_name == "pads") { layer.pads = attr.ints()[0]; }
         else if (attr_name == "strides") { layer.strides = attr.ints()[0]; }
+        else { std::cout << "Unknown int attribute " << std::endl; }
       }
     }
 
     return;
   }
 
-  void extractFloatAttributes(const onnx::NodeProto* node, Layer &layer) {
+  void extractFloatAttributes(const onnx::NodeProto* node, Layer& layer) {
+    for (const auto& attr : node->attribute()) {
+      if (attr.floats_size() > 0) {
+        const std::string& attr_name = attr.name();
+        if (attr_name == "alpha") { layer.alpha = attr.floats()[0]; }
+        else if (attr_name == "epsilon") { layer.epsilon = attr.floats()[0]; }
+        else { std::cout << "Unknown float attribute" << std::endl; }
+      }
+    } 
+
+    return;
+  }
+
+  void extractConstant(const onnx::NodeProto* node, tensor1d& constant_tensor) {
     for (const auto& attr : node->attribute()) {
       if (attr.has_t()) {
         const onnx::TensorProto& tensor = attr.t();
@@ -576,19 +722,18 @@ class OnnxParser {
             const float* data = reinterpret_cast<const float*>(raw.data());
             size_t numel = raw.size() / sizeof(float);
             for (size_t i = 0; i < numel; ++i) {
-              if (layer.type == LayerType::Sub) { layer.sub_values.push_back(data[i]); }
-              else if (layer.type == LayerType::Div) { layer.div_values.push_back(data[i]); }
+              constant_tensor.push_back(data[i]);
             }
           }
         }
       }
       else if (attr.floats_size() > 0) {
         for (const auto& f : attr.floats()) {
-          if (layer.type == LayerType::Sub) { layer.sub_values.push_back(f); }
-          else if (layer.type == LayerType::Div) { layer.div_values.push_back(f); }
+          constant_tensor.push_back(f);
         }
       }
-    } 
+      else { std::cout << "Not implemented yet." << std::endl; }
+    }
 
     return;
   }
@@ -630,7 +775,7 @@ class OnnxParser {
     return;
   }
 
-  void updateConvLayerInfo(Layer &layer, size_t &input_height, size_t &input_width) {
+  void updateConvMaxPoolLayerInfo(Layer &layer, size_t &input_height, size_t &input_width) {
     // <output_dim, input_dim, kernel_height, kernel_weight>
     layer.output_channels = layer.conv_weights.size();
     layer.input_channels = layer.conv_weights[0].size();
@@ -760,28 +905,15 @@ class OnnxParser {
 }  // namespace impl
 
 template <class Allocator>
-TFormula<Allocator> parse_onnx_str(const std::string& input, SolverOutput<Allocator>& output) {
-  impl::OnnxParser<Allocator> parser(output);
+TFormula<Allocator> parse_onnx_str(const std::string& input) {
+  impl::OnnxParser<Allocator> parser;
   return parser.parse(input);
 }
 
 template <class Allocator>
-TFormula<Allocator> parse_onnx(const std::string& filename, SolverOutput<Allocator>& output) {
-  return parse_onnx_str<Allocator>(filename, output);
+TFormula<Allocator> parse_onnx(const std::string& filename) {
+  return parse_onnx_str<Allocator>(filename);
 }
-
-template <class Allocator>
-TFormula<Allocator> parse_onnx_str(const std::string& input, const Allocator& allocator = Allocator()) {
-  SolverOutput<Allocator> output(allocator);
-  return parse_onnx_str(input, output);
-}
-
-template <class Allocator>
-TFormula<Allocator> parse_onnx(const std::string& filename, const Allocator& allocator = Allocator()) {
-  SolverOutput<Allocator> output(allocator);
-  return parse_onnx(filename, output);
-}
-
 }  // namespace lala
 
 #endif

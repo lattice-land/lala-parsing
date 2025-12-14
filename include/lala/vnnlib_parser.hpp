@@ -17,6 +17,7 @@
 #include "lala/logic/ast.hpp"
 #include "peglib.h"
 
+
 namespace lala {
 
 namespace impl {
@@ -70,7 +71,7 @@ class VnnlibParser {
     parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
     parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
-    std::cout << input.c_str() << std::endl;
+    // std::cout << input.c_str() << std::endl;
     FSeq seq;
     F vnnlib_formulas;
     if (parser.parse(input.c_str(), vnnlib_formulas) && !error) {
@@ -132,7 +133,8 @@ class VnnlibParser {
 					LEQ,
 					f(sv[2]));
       } 
-      else if (binary_operator == ">=") {
+      else {
+        assert (binary_operator == ">=");
         return F::make_binary(
 					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
 					GEQ,
@@ -146,7 +148,8 @@ class VnnlibParser {
 					LEQ,
 					F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
       } 
-      else if (binary_operator == ">=") {
+      else {
+        assert (binary_operator == ">=");
         return F::make_binary(
 					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
 					GEQ,

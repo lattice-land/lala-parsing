@@ -1,7 +1,7 @@
 // Copyright 2025 Yi-Nung Tsao
 
-#ifndef LALA_PARSING_VNNLIB_PARSER_HPP
-#define LALA_PARSING_VNNLIB_PARSER_HPP
+#ifndef LALA_PARSING_SMT_PARSER_HPP
+#define LALA_PARSING_SMT_PARSER_HPP
 
 #include <any>
 #include <cassert>

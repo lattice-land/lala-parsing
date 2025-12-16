@@ -109,12 +109,9 @@ class SMTParser {
     }
   }
 
-  F make_variable_decl(const SV& sv) {
-    // auto name = std::any_cast<std::string>(sv[0]);
-    // auto ty = So(So::Real);
-
-    // return F::make_exists(UNTYPED, LVar<allocator_type>(name.data()), ty);
-    return F::make_true();
+  F make_variable_decl(const SV& sv) { 
+    // For nnv project, all the variables wil be created in onnx_parser.hpp.
+    return F::make_true(); 
   }
 
   F make_bound(const SV& sv) {

@@ -23,7 +23,7 @@ namespace lala {
 namespace impl {
 
 template <class Allocator>
-class VnnlibParser {
+class SMTParser {
   using allocator_type = Allocator;
   using F = TFormula<allocator_type>;
   using SV = peg::SemanticValues;
@@ -35,7 +35,7 @@ class VnnlibParser {
   F &onnx_formulas;
 
  public:
-  VnnlibParser(F &f) : error(false), silent(false), onnx_formulas(f) {}
+  SMTParser(F &f) : error(false), silent(false), onnx_formulas(f) {}
 
   battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
 			peg::parser parser(R"(
@@ -71,12 +71,11 @@ class VnnlibParser {
     parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
     parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
-    // std::cout << input.c_str() << std::endl;
     FSeq seq;
-    F vnnlib_formulas;
-    if (parser.parse(input.c_str(), vnnlib_formulas) && !error) {
+    F smt_formulas;
+    if (parser.parse(input.c_str(), smt_formulas) && !error) {
       seq.push_back(onnx_formulas);
-      seq.push_back(vnnlib_formulas);
+      seq.push_back(smt_formulas);
       return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(F::make_nary(AND, std::move(seq))));
     } 
     else {
@@ -187,18 +186,18 @@ class VnnlibParser {
 }  // namespace impl
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator> parse_vnnlib_str(const std::string& input, TFormula<Allocator>&f) {
-  impl::VnnlibParser<Allocator> parser(f);
+battery::shared_ptr<TFormula<Allocator>, Allocator> parse_smt_str(const std::string& input, TFormula<Allocator>&f) {
+  impl::SMTParser<Allocator> parser(f);
   return parser.parse(input);
 }
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator> parse_vnnlib(const std::string& filename, TFormula<Allocator>&f) {
+battery::shared_ptr<TFormula<Allocator>, Allocator> parse_smt(const std::string& filename, TFormula<Allocator>&f) {
   std::ifstream t(filename);
   if (t.is_open()) {
     std::string input((std::istreambuf_iterator<char>(t)),
                       std::istreambuf_iterator<char>());
-    return parse_vnnlib_str<Allocator>(input, f);
+    return parse_smt_str<Allocator>(input, f);
   } else {
     std::cerr << "File `" << filename << "` does not exists." << std::endl;
   }

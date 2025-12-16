@@ -111,20 +111,19 @@ class OnnxParser {
   OnnxParser() : error(false), silent(false) {}
 
   F parse(const std::string& onnx_model_directory) {
-    F empty;
     onnx::ModelProto model;
     std::ifstream input(onnx_model_directory, std::ios::in | std::ios::binary);
 
     if (!input) {
       std::cerr << "Failed to open: " + onnx_model_directory << std::endl;
       error = true;
-      return empty;
+      return F::make_false();
     }
 
     if (!model.ParseFromIstream(&input)) {
       std::cerr << "Failed to parse onnx file." << std::endl;
       error = true;
-      return empty;
+      return F::make_false();
     }
 
     const onnx::GraphProto& graph = model.graph();
@@ -183,7 +182,7 @@ class OnnxParser {
       if (layer.type == LayerType::Unknown) {
         std::cerr << "Unknown layer type." << std::endl;
         error = true;
-        return empty;
+        return F::make_false();
       } 
       else if (layer.type == LayerType::Constant) { continue; }
 
@@ -210,7 +209,7 @@ class OnnxParser {
           else { 
             std::cerr << "Unknown behavior!" << std::endl; 
             error = true;
-            return empty;
+            return F::make_false();
           }
         } 
         else if (layer.type == LayerType::Sub) {
@@ -265,7 +264,7 @@ class OnnxParser {
         else { 
           std::cerr << "Unknown layer type." << std::endl; 
           error = true;
-          return empty; 
+          return F::make_false(); 
         }
       }
 

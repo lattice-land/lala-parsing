@@ -32,12 +32,11 @@ class SMTParser {
 
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
-  F &onnx_formulas;
 
  public:
-  SMTParser(F &f) : error(false), silent(false), onnx_formulas(f) {}
+  SMTParser() : error(false), silent(false) {}
 
-  battery::shared_ptr<F, allocator_type> parse(const std::string& input) {
+  F parse(const std::string& input) {
 			peg::parser parser(R"(
 				Statements    <- (DeclareVar / Assertion / Comment)+
 
@@ -71,16 +70,13 @@ class SMTParser {
     parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
     parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
-    FSeq seq;
     F smt_formulas;
     if (parser.parse(input.c_str(), smt_formulas) && !error) {
-      seq.push_back(onnx_formulas);
-      seq.push_back(smt_formulas);
-      return battery::make_shared<TFormula<Allocator>, Allocator>(std::move(F::make_nary(AND, std::move(seq))));
+      return smt_formulas; 
     } 
     else {
-      // in here, f will be empty;
-      return nullptr;
+      std::cerr << "SMT parsing is failed." << std::endl;
+      return F::make_false();
     }
   }
 
@@ -186,22 +182,22 @@ class SMTParser {
 }  // namespace impl
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator> parse_smt_str(const std::string& input, TFormula<Allocator>&f) {
-  impl::SMTParser<Allocator> parser(f);
+TFormula<Allocator> parse_smt_str(const std::string& input) {
+  impl::SMTParser<Allocator> parser;
   return parser.parse(input);
 }
 
 template <class Allocator>
-battery::shared_ptr<TFormula<Allocator>, Allocator> parse_smt(const std::string& filename, TFormula<Allocator>&f) {
+TFormula<Allocator> parse_smt(const std::string& filename) {
   std::ifstream t(filename);
   if (t.is_open()) {
     std::string input((std::istreambuf_iterator<char>(t)),
                       std::istreambuf_iterator<char>());
-    return parse_smt_str<Allocator>(input, f);
+    return parse_smt_str<Allocator>(input);
   } else {
     std::cerr << "File `" << filename << "` does not exists." << std::endl;
   }
-  return nullptr;
+  return TFormula<Allocator>::make_false();
 }
 
 }  // namespace lala

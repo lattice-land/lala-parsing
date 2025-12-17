@@ -425,7 +425,11 @@ public:
       if (name == "int_tdiv") { return make_binary_fun_eq(TDIV, sv); }
       if (name == "int_cdiv") { return make_binary_fun_eq(CDIV, sv); }
       if (name == "int_fdiv") { return make_binary_fun_eq(FDIV, sv); }
-      if (name == "int_mod") { return make_binary_fun_eq(EMOD, sv); }
+      if (name == "int_mod") { return make_binary_fun_eq(TMOD, sv); }
+      if (name == "int_emod") { return make_binary_fun_eq(EMOD, sv); }
+      if (name == "int_tmod") { return make_binary_fun_eq(TMOD, sv); }
+      if (name == "int_cmod") { return make_binary_fun_eq(CMOD, sv); }
+      if (name == "int_fmod") { return make_binary_fun_eq(FMOD, sv); }
       if (name == "int_plus") { return make_binary_fun_eq(ADD, sv); }
       if (name == "int_minus") { return make_binary_fun_eq(SUB, sv); }
       if (name == "int_pow") { return make_binary_fun_eq(POW, sv); }

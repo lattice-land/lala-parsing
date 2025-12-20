@@ -218,7 +218,6 @@ class OnnxParser {
         } 
         else if (layer.type == LayerType::Sub) {
           // Finding the constant in Sub node
-          std::cout << "input_name = " << input_name << std::endl;
           if (producer_map.find(input_name) != producer_map.end()) {
             if (extractConstant(producer_map[input_name], layer.sub_values))
               continue;
@@ -227,13 +226,9 @@ class OnnxParser {
           layer.input_height = layers[0].input_height;
           layer.input_width = layers[0].input_width;
           layer.source_layers.push_back(layer_index_map[input_name]);
-          std::cout << "added a sub node.\n";
         } 
         else if (layer.type == LayerType::Div) {
           // Finding the constant in Div node
-          // ! it has a problem
-          // the if condition is true for twice.
-          std::cout << "input_name = " << input_name << std::endl;
           if (producer_map.find(input_name) != producer_map.end()) {
             if (extractConstant(producer_map[input_name], layer.div_values))
               continue;
@@ -241,9 +236,7 @@ class OnnxParser {
           layer.size = layers[0].size; 
           layer.input_height = layers[0].input_height;
           layer.input_width = layers[0].input_width;
-          std::cout << "adding source layer for div node.\n";
           layer.source_layers.push_back(layer_index_map[input_name]);
-          std::cout << "added a div node.\n";
         }
         else if (layer.type == LayerType::Flatten) { 
           layer.size = layers[layers.size() - 1].size; 
@@ -289,10 +282,8 @@ class OnnxParser {
       // create variables at current layer then build constraint for this node/layer
       make_neurons(layer, graph.output()[0].name() == node.output()[0].c_str());
       seq.push_back(std::move(make_node(layer)));
-      std::cout << "made a node." << std::endl;
       // store into list of layers
       layers.emplace_back(layer);
-      std::cout << "added new layer." << std::endl;
     }
 
     google::protobuf::ShutdownProtobufLibrary();
@@ -508,8 +499,6 @@ class OnnxParser {
 
   F make_gemm_node(const Layer& layer) {
     assert (layer.source_layers.size() == 1);
-    std::cout << "the size of source layer = " << layers[layer.source_layers[0]].size << std::endl;
-    std::cout << "the size of the layer = " << layer.size << std::endl;
     FSeq seq;
     for (size_t i = 0; i < layer.size; ++i) {
       // create variable

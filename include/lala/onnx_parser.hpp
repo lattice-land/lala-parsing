@@ -127,7 +127,7 @@ class OnnxParser {
     }
 
     const onnx::GraphProto& graph = model.graph();
-#ifdef DEBUG
+#ifndef NDEBUG
     std::cout << "onnx model name: " << graph.name() << std::endl;
     std::cout << "number of nodes: " << graph.node_size() << std::endl;
     std::cout << "number of initializers (weights/biases): " << graph.initializer_size() << std::endl;
@@ -153,7 +153,7 @@ class OnnxParser {
     std::unordered_map<std::string, const onnx::NodeProto*> producer_map;
     for (const auto& node : graph.node()) {
       if (node.output_size() > 0) {
-        producer_map[node.output(0)] = &node;
+        producer_map[node.output()[0]] = &node;
       }
     }
 
@@ -170,15 +170,15 @@ class OnnxParser {
     layers.emplace_back(input_layer);
 
     // Iterate over nodes in the network graph
-    std::unordered_map<std::string, size_t> layer_index_map;
+    std::unordered_map<std::string, size_t> layer_index_map; // key: input node name, value: its layer index
+    layer_index_map[graph.input()[0].name()] = input_layer.id;
     for (const auto& node : graph.node()) {
       Layer layer;
       layer.id = layers.size();
       layer.type = setLayerType(node);
-#ifdef DEBUG
-      std::cout << "Node: " << node.name() << "| OpType: " << node.op_type() << std::endl;
+#ifndef NDEBUG
+      std::cout << "Node: " << node.output()[0] << "| OpType: " << node.op_type() << std::endl;
 #endif
-      layer_index_map[node.name()] = layer.id;
       if (layer.type == LayerType::Unknown) {
         std::cerr << "Unknown layer type." << std::endl;
         error = true;
@@ -186,6 +186,9 @@ class OnnxParser {
       } 
       else if (layer.type == LayerType::Constant) { continue; }
 
+      // Note: in some networks, there is no node name, but the output name is always well defined. 
+      //       So we use output name to match the layer index except input layer.
+      layer_index_map[node.output()[0]] = layer.id; 
       for (const auto& input_name : node.input()) {
         // If the input is a weight tensor
         if (tensor_map.find(input_name) != tensor_map.end()) {
@@ -204,6 +207,7 @@ class OnnxParser {
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Conv) {
             extractIntAttributes(node, layer);
             layer.conv_weights = extract4DTensorData(tensor);
+            // layer.weights = convert4Dto2DTensor(layer.conv_weights, input_height, input_width, layer.strides, layer.pads);
             updateConvMaxPoolLayerInfo(layer, input_height, input_width);
           }
           else { 
@@ -214,25 +218,32 @@ class OnnxParser {
         } 
         else if (layer.type == LayerType::Sub) {
           // Finding the constant in Sub node
+          std::cout << "input_name = " << input_name << std::endl;
           if (producer_map.find(input_name) != producer_map.end()) {
-            extractConstant(producer_map[input_name], layer.sub_values);
+            if (extractConstant(producer_map[input_name], layer.sub_values))
+              continue;
           }
-
           layer.size = layers[0].size;
           layer.input_height = layers[0].input_height;
           layer.input_width = layers[0].input_width;
           layer.source_layers.push_back(layer_index_map[input_name]);
+          std::cout << "added a sub node.\n";
         } 
         else if (layer.type == LayerType::Div) {
           // Finding the constant in Div node
+          // ! it has a problem
+          // the if condition is true for twice.
+          std::cout << "input_name = " << input_name << std::endl;
           if (producer_map.find(input_name) != producer_map.end()) {
-            extractConstant(producer_map[input_name], layer.div_values);
+            if (extractConstant(producer_map[input_name], layer.div_values))
+              continue;
           }
-
           layer.size = layers[0].size; 
           layer.input_height = layers[0].input_height;
           layer.input_width = layers[0].input_width;
+          std::cout << "adding source layer for div node.\n";
           layer.source_layers.push_back(layer_index_map[input_name]);
+          std::cout << "added a div node.\n";
         }
         else if (layer.type == LayerType::Flatten) { 
           layer.size = layers[layers.size() - 1].size; 
@@ -268,7 +279,7 @@ class OnnxParser {
         }
       }
 
-#ifdef DEBUG
+#ifndef NDEBUG
       // The outputs of the node
       for (const auto& output_name : node.output()) {
         std::cout << "  Output: " << output_name << std::endl;
@@ -278,9 +289,10 @@ class OnnxParser {
       // create variables at current layer then build constraint for this node/layer
       make_neurons(layer, graph.output()[0].name() == node.output()[0].c_str());
       seq.push_back(std::move(make_node(layer)));
-
+      std::cout << "made a node." << std::endl;
       // store into list of layers
       layers.emplace_back(layer);
+      std::cout << "added new layer." << std::endl;
     }
 
     google::protobuf::ShutdownProtobufLibrary();
@@ -353,6 +365,9 @@ class OnnxParser {
     assert(layer.source_layers.size() == 1);
     FSeq seq; 
     if (layer.sub_values.size() == 0) {
+      std::cout << "layer.size = " << layer.size << std::endl;
+      std::cout << "source layer size = " << layers[layer.source_layers[0]].size << std::endl;
+      std::cout << "source layer id = " << layer.source_layers[0] << std::endl;
       for (size_t i = 0; i < layer.size; ++i) {
         // create variable
         auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
@@ -365,11 +380,15 @@ class OnnxParser {
       }
     }
     else {
+      std::cout << "layer.size = " << layer.size << std::endl;
+      std::cout << "source layer id = " << layer.source_layers[0] << std::endl;
+      std::cout << "source layer size = " << layers[layer.source_layers[0]].size << std::endl;
       for (size_t i = 0; i < layer.size; ++i) {
         int dim = i / (layer.input_height * layer.input_width);
 
         // create variable 
         auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
+        seq.push_back(std::move(var));
 
         // x' = x - sub_value;
         seq.push_back(F::make_binary(
@@ -489,6 +508,8 @@ class OnnxParser {
 
   F make_gemm_node(const Layer& layer) {
     assert (layer.source_layers.size() == 1);
+    std::cout << "the size of source layer = " << layers[layer.source_layers[0]].size << std::endl;
+    std::cout << "the size of the layer = " << layer.size << std::endl;
     FSeq seq;
     for (size_t i = 0; i < layer.size; ++i) {
       // create variable
@@ -518,12 +539,12 @@ class OnnxParser {
     const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
 
     FSeq seq;
-    seq.reserve(output_size * 2);
+    // seq.reserve(output_size * 2);
     size_t row = 0;
     for (size_t oc = 0; oc < layer.output_channels; ++oc) {
       for (size_t oh = 0; oh < layer.conv_output_height; ++oh) {
         for (size_t ow = 0; ow < layer.conv_output_width; ++ow) {
-#ifdef DEBUG
+#ifndef NDEBUG
           // bound check for now (defensive)
           if (row >= output_size) {
             std::cerr << "ERROR: row >= output_size: row=" << row << "output_size=" << output_size << std::endl;
@@ -532,7 +553,7 @@ class OnnxParser {
 #endif
           // create variable
           auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[row]), So(So::Real));
-          seq.emplace_back(std::move(var));
+          seq.push_back(std::move(var));
 
           FSeq affine;
           affine.reserve(layer.input_channels * layer.kernel_height * layer.kernel_width + 1);
@@ -545,7 +566,7 @@ class OnnxParser {
 
                 if (ih >= 0 && ih < layer.conv_input_height && iw >= 0 && iw < layer.conv_input_width) {
                   size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
-#ifdef DEBUG
+#ifndef NDEBUG
                   // defensive check for col bounds
                   if (col >= input_size) {
                     std::cerr << "ERROR: computed col out of range: col=" << col << " input_size=" << input_size 
@@ -562,7 +583,7 @@ class OnnxParser {
             }
           }
           affine.emplace_back(F::make_real(layer.biases[row], layer.biases[row]));
-          seq.emplace_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[row])), EQ, F::make_nary(ADD, std::move(affine))));
+          seq.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[row])), EQ, F::make_nary(ADD, std::move(affine))));
           ++row;
         }
       }
@@ -607,7 +628,7 @@ class OnnxParser {
     for (size_t oc = 0; oc < layer.output_channels; ++oc) {
       for (size_t oh = 0; oh < layer.conv_output_height; ++oh) {
         for (size_t ow = 0; ow < layer.conv_output_width; ++ow) {
-#ifdef DEBUG
+#ifndef NDEBUG
           // bound check for now (defensive)
           if (row >= output_size) {
             std::cerr << "ERROR: row >= output_size: row=" << row << "output_size=" << output_size << std::endl;
@@ -628,7 +649,7 @@ class OnnxParser {
 
                 if (ih >= 0 && ih < layer.conv_input_height && iw >= 0 && iw < layer.conv_input_width) {
                   size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
-#ifdef DEBUG
+#ifndef NDEBUG
                   // defensive check for col bounds
                   if (col >= input_size) {
                     std::cerr << "ERROR: computed col out of range: col=" << col << " input_size=" << input_size 
@@ -721,8 +742,10 @@ class OnnxParser {
     return;
   }
 
-  void extractConstant(const onnx::NodeProto* node, tensor1d& constant_tensor) {
+  bool extractConstant(const onnx::NodeProto* node, tensor1d& constant_tensor) {
+    bool hasAttributes = false;
     for (const auto& attr : node->attribute()) {
+      hasAttributes = true;
       if (attr.has_t()) {
         const onnx::TensorProto& tensor = attr.t();
         if (tensor.data_type() == onnx::TensorProto::FLOAT) {
@@ -744,7 +767,9 @@ class OnnxParser {
       else { std::cout << "Not implemented yet." << std::endl; }
     }
 
-    return;
+    std::cout << "finished attributes extraction procedure.\n";
+
+    return hasAttributes;
   }
 
   tensor1d extract1DTensorData(const onnx::TensorProto& tensor) {
@@ -868,7 +893,6 @@ class OnnxParser {
     for (size_t oc = 0; oc < output_channels; ++oc) {
       for (size_t oh = 0; oh < output_H; ++oh) {
         for (size_t ow = 0; ow < output_W; ++ow) {
-
           // bounds check for row (defensive)
           if (row >= output_size) {
             std::cerr << "ERROR: row >= output_size: row=" << row
@@ -907,7 +931,7 @@ class OnnxParser {
         }
       }
     }
-
+    std::cout << "after converting 4d tensor to 2d tensor\n";
     return result_weights;
   }
 };

@@ -476,7 +476,7 @@ public:
       if (name == "set_lt") { return make_binary(LT, sv); }
       if (name == "set_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
       if (name == "float_abs") { return make_binary_fun_eq(ABS, sv); }
-      if (name == "float_neg") { return make_binary_fun_eq(NEG, sv); }
+      if (name == "float_neg") { return make_unary_fun_eq(NEG, sv); }
       if (name == "float_plus") { return make_binary_fun_eq(ADD, sv); }
       if (name == "float_minus") { return make_binary_fun_eq(SUB, sv); }
       if (name == "float_times") { return make_binary_fun_eq(MUL, sv); }

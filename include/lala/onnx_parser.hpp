@@ -89,6 +89,8 @@ struct Layer {
   size_t group;
   size_t pads;
   size_t strides;
+  bool transA;
+  bool transB;
 };
 }  // namespace lala
 
@@ -134,6 +136,7 @@ class OnnxParser {
 #endif
 
     // Create a map from tensor name to TensorProto for fast lookup
+    // As long as the parameters (weights, biases, etc.) exist, the input_name will be stored in tensor_map
     std::unordered_map<std::string, onnx::TensorProto> tensor_map;
     for (const auto& initializer : graph.initializer()) {
       tensor_map[initializer.name()] = initializer;
@@ -147,15 +150,6 @@ class OnnxParser {
     size_t input_height = input_shape.dim().size() > 2 ? input_shape.dim(2).dim_value() : 1;
     size_t input_width = input_shape.dim().size() > 3 ? input_shape.dim(3).dim_value() : 1;
     size_t input_dimensions = batch_size * input_channels * input_height * input_width;  // number of input neurons.
-
-    // Build a map from tensor name -> node that produces it
-    // This is for linking sub/div node and its input nodes.
-    std::unordered_map<std::string, const onnx::NodeProto*> producer_map;
-    for (const auto& node : graph.node()) {
-      if (node.output_size() > 0) {
-        producer_map[node.output()[0]] = &node;
-      }
-    }
 
     FSeq seq;
     // Create an input layer.
@@ -189,25 +183,40 @@ class OnnxParser {
       // Note: in some networks, there is no node name, but the output name is always well defined. 
       //       So we use output name to match the layer index except input layer.
       layer_index_map[node.output()[0]] = layer.id; 
-      for (const auto& input_name : node.input()) {
-        // If the input is a weight tensor
+      // for (const auto& input_name : node.input()) {
+      for (size_t i = 0; i < node.input().size(); ++i) {
+        const std::string input_name = node.input()[i];
         if (tensor_map.find(input_name) != tensor_map.end()) {
-          // In this case, node.op_type() could be Gemm, MatMul, Add, Conv
           const auto& tensor = tensor_map[input_name];
           if (tensor.dims().size() == 1) {
             // bias 1d tensor
+            // In this case, layer type can be either "Add" or "Conv".
             layer.biases = extract1DTensorData(tensor);
             updateBiasTensor(layer);
           } 
           else if (tensor.dims().size() == 2) {
+            extractIntAttributes(node, layer);
             // weight 2d tensor
-            layer.weights = extract2DTensorData(tensor);
-            layer.size = layer.weights[0].size();  // <output_dimensions, input_dimensions>
+            // In this case, layer type can be either "MatMul" or "Gemm".
+            if (layer.type == LayerType::MatMul) layer.weights = extract2DTensorData(tensor, i == 1);
+            else if (layer.type == LayerType::Gemm) layer.weights = extract2DTensorData(tensor, layer.transB);
           } 
+          else if (tensor.dims().size() == 4 && layer.type == LayerType::Sub) {
+            layer.sub_values = extract1DTensorData(tensor);
+            layer.input_height = layers[0].input_height;
+            layer.input_width = layers[0].input_width;
+            layer.source_layers.push_back(layer_index_map[input_name]);
+          }
+          else if (tensor.dims().size() == 4 && layer.type == LayerType::Div) {
+            layer.div_values = extract1DTensorData(tensor);
+            layer.input_height = layers[0].input_height;
+            layer.input_width = layers[0].input_width;
+            layer.source_layers.push_back(layer_index_map[input_name]);
+          }
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Conv) {
             extractIntAttributes(node, layer);
             layer.conv_weights = extract4DTensorData(tensor);
-            // layer.weights = convert4Dto2DTensor(layer.conv_weights, input_height, input_width, layer.strides, layer.pads);
+            // layer.weights = convert4Dto2DTensor(layer.conv_weights, input_height, input_width, layer.strides, layer.pads); // This is very slow and waste lots of memory for sparse matrix.
             updateConvMaxPoolLayerInfo(layer, input_height, input_width);
           }
           else { 
@@ -215,37 +224,11 @@ class OnnxParser {
             error = true;
             return F::make_false();
           }
-        } 
-        else if (layer.type == LayerType::Sub) {
-          // Finding the constant in Sub node
-          if (producer_map.find(input_name) != producer_map.end()) {
-            if (extractConstant(producer_map[input_name], layer.sub_values))
-              continue;
-          }
-          layer.size = layers[0].size;
-          layer.input_height = layers[0].input_height;
-          layer.input_width = layers[0].input_width;
-          layer.source_layers.push_back(layer_index_map[input_name]);
-        } 
-        else if (layer.type == LayerType::Div) {
-          // Finding the constant in Div node
-          if (producer_map.find(input_name) != producer_map.end()) {
-            if (extractConstant(producer_map[input_name], layer.div_values))
-              continue;
-          }
-          layer.size = layers[0].size; 
-          layer.input_height = layers[0].input_height;
-          layer.input_width = layers[0].input_width;
-          layer.source_layers.push_back(layer_index_map[input_name]);
-        }
-        else if (layer.type == LayerType::Flatten) { 
-          layer.size = layers[layers.size() - 1].size; 
-          layer.source_layers.push_back(layer_index_map[input_name]);
-        } 
-        else if (layer.type == LayerType::Relu) { 
-          layer.size = layers[layers.size() - 1].size; 
-          layer.source_layers.push_back(layer_index_map[input_name]);
-        }
+        } // If the node doesn't have tensor, we just update its source layers.
+        else if (layer.type == LayerType::Sub) { continue; } 
+        else if (layer.type == LayerType::Div) { continue; }
+        else if (layer.type == LayerType::Flatten) { layer.source_layers.push_back(layer_index_map[input_name]); } 
+        else if (layer.type == LayerType::Relu) { layer.source_layers.push_back(layer_index_map[input_name]); }
         else if (layer.type == LayerType::MaxPool) { 
           updateConvMaxPoolLayerInfo(layer, input_height, input_width); 
           layer.source_layers.push_back(layer_index_map[input_name]);
@@ -253,23 +236,9 @@ class OnnxParser {
         else if (layer.type == LayerType::Gemm) { layer.source_layers.push_back(layer_index_map[input_name]); }
         else if (layer.type == LayerType::MatMul) { layer.source_layers.push_back(layer_index_map[input_name]); }
         else if (layer.type == LayerType::Conv) { layer.source_layers.push_back(layer_index_map[input_name]); }
-        else if (layer.type == LayerType::Add) { 
-          layer.size = layers[layers.size() - 1].size;
-          layer.source_layers.push_back(layer_index_map[input_name]); 
-        }  
-        else if (layer.type == LayerType::Dropout) { 
-          layer.size = layers[layers.size() - 1].size; 
-          layer.source_layers.push_back(layer_index_map[input_name]);
-        }
-        else if (layer.type == LayerType::BatchNormalization){ 
-          layer.size = layers[layers.size() - 1].size; 
-          layer.source_layers.push_back(layer_index_map[input_name]);
-        } 
-        else { 
-          std::cerr << "Unknown layer type." << std::endl; 
-          error = true;
-          return F::make_false(); 
-        }
+        else if (layer.type == LayerType::Add) { layer.source_layers.push_back(layer_index_map[input_name]); }  
+        else if (layer.type == LayerType::Dropout) { layer.source_layers.push_back(layer_index_map[input_name]); }
+        else if (layer.type == LayerType::BatchNormalization){ layer.source_layers.push_back(layer_index_map[input_name]); } 
       }
 
 #ifndef NDEBUG
@@ -280,6 +249,7 @@ class OnnxParser {
 #endif
 
       // create variables at current layer then build constraint for this node/layer
+      setLayerSize(layer);
       make_neurons(layer, graph.output()[0].name() == node.output()[0].c_str());
       seq.push_back(std::move(make_node(layer)));
       // store into list of layers
@@ -308,6 +278,24 @@ class OnnxParser {
     else if (node.op_type() == "Dropout") { return LayerType::Dropout; }
     else if (node.op_type() == "BatchNormalization") { return LayerType::BatchNormalization; }
     else { return LayerType::Unknown; }
+  }
+
+  bool setLayerSize(Layer& layer) {
+    if (layer.type == LayerType::Sub) { layer.size = layer.sub_values.size(); }
+    else if (layer.type == LayerType::Div) { layer.size = layer.div_values.size(); }
+    else if (layer.type == LayerType::Constant) {}
+    else if (layer.type == LayerType::Flatten) { layer.size = layers[layer.source_layers[0]].size; }
+    else if (layer.type == LayerType::MatMul) { layer.size = layer.weights.size(); }
+    else if (layer.type == LayerType::Add) { layer.size = layer.biases.size(); }
+    else if (layer.type == LayerType::Gemm) { layer.size = layer.weights.size(); }
+    else if (layer.type == LayerType::Conv) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }
+    else if (layer.type == LayerType::Relu) { layer.size = layers[layer.source_layers[0]].size; }
+    else if (layer.type == LayerType::MaxPool) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }
+    else if (layer.type == LayerType::Dropout) { layer.size = layers[layer.source_layers[0]].size; }
+    else if (layer.type == LayerType::BatchNormalization) { layer.size = layers[layer.source_layers[0]].size; }
+    else return false;
+
+    return true;
   }
 
   F make_node(const Layer& layer) {
@@ -356,9 +344,6 @@ class OnnxParser {
     assert(layer.source_layers.size() == 1);
     FSeq seq; 
     if (layer.sub_values.size() == 0) {
-      std::cout << "layer.size = " << layer.size << std::endl;
-      std::cout << "source layer size = " << layers[layer.source_layers[0]].size << std::endl;
-      std::cout << "source layer id = " << layer.source_layers[0] << std::endl;
       for (size_t i = 0; i < layer.size; ++i) {
         // create variable
         auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
@@ -371,9 +356,6 @@ class OnnxParser {
       }
     }
     else {
-      std::cout << "layer.size = " << layer.size << std::endl;
-      std::cout << "source layer id = " << layer.source_layers[0] << std::endl;
-      std::cout << "source layer size = " << layers[layer.source_layers[0]].size << std::endl;
       for (size_t i = 0; i < layer.size; ++i) {
         int dim = i / (layer.input_height * layer.input_width);
 
@@ -456,11 +438,10 @@ class OnnxParser {
 
       FSeq rhs; 
       for (size_t sidx = 0; sidx < layer.source_layers.size(); ++sidx) {
-        // not sure which one is correct yet.
-        // for (size_t j = 0; j < layers[layer.source_layers[sidx]].size; ++j){
-        //   rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[j])));
-        // }
-        rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[i])));
+        // In some cases, add node would have multiple source layers.
+        for (size_t j = 0; j < layers[layer.source_layers[sidx]].size; ++j){
+          rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[j])));
+        }
       }
       rhs.push_back(F::make_real(layer.biases[i], layer.biases[i]));
 
@@ -476,24 +457,23 @@ class OnnxParser {
   F make_matmul_node(const Layer& layer) {
     assert(layer.source_layers.size() == 1);
     FSeq seq;
-    for (size_t j = 0; j < layer.size; ++j) {
+    for (size_t i = 0; i < layer.size; ++i) {
       // create variable
-      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(layer.neurons[j]), So(So::Real));
+      auto var = F::make_exists(UNTYPED,LVar<allocator_type>(layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
 
       FSeq affine;
-      for (size_t i = 0; i < layers[layer.source_layers[0]].size; ++i) {
+      for (size_t j = 0; j < layers[layer.source_layers[0]].size; ++j) {
         affine.push_back(F::make_binary(
             F::make_real(layer.weights[i][j], layer.weights[i][j]),
             MUL,
-            F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))));
+            F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[j]))));
       }
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[j])), 
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])), 
           EQ,
           F::make_nary(ADD, std::move(affine))));
     }
-
     return F::make_nary(AND, std::move(seq));
   }
 
@@ -600,7 +580,7 @@ class OnnxParser {
           F::make_binary(
               F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])),
               MAX,
-              F::make_z(0))));
+              F::make_real(0.0,0.0))));
     }
     return F::make_nary(AND, std::move(seq));
   }
@@ -711,6 +691,8 @@ class OnnxParser {
         }
         else if (attr_name == "pads") { layer.pads = attr.ints()[0]; }
         else if (attr_name == "strides") { layer.strides = attr.ints()[0]; }
+        else if (attr_name == "transA") { layer.transA = attr.ints()[0]; }
+        else if (attr_name == "transB") { layer.transB = attr.ints()[0]; }
         else { std::cout << "Unknown int attribute " << std::endl; }
       }
     }
@@ -729,36 +711,6 @@ class OnnxParser {
     } 
 
     return;
-  }
-
-  bool extractConstant(const onnx::NodeProto* node, tensor1d& constant_tensor) {
-    bool hasAttributes = false;
-    for (const auto& attr : node->attribute()) {
-      hasAttributes = true;
-      if (attr.has_t()) {
-        const onnx::TensorProto& tensor = attr.t();
-        if (tensor.data_type() == onnx::TensorProto::FLOAT) {
-          if (!tensor.raw_data().empty()) {
-            const std::string& raw = tensor.raw_data();
-            const float* data = reinterpret_cast<const float*>(raw.data());
-            size_t numel = raw.size() / sizeof(float);
-            for (size_t i = 0; i < numel; ++i) {
-              constant_tensor.push_back(data[i]);
-            }
-          }
-        }
-      }
-      else if (attr.floats_size() > 0) {
-        for (const auto& f : attr.floats()) {
-          constant_tensor.push_back(f);
-        }
-      }
-      else { std::cout << "Not implemented yet." << std::endl; }
-    }
-
-    std::cout << "finished attributes extraction procedure.\n";
-
-    return hasAttributes;
   }
 
   tensor1d extract1DTensorData(const onnx::TensorProto& tensor) {
@@ -809,20 +761,27 @@ class OnnxParser {
     layer.conv_output_height = (input_height + 2 * layer.pads - layer.kernel_height) / layer.strides + 1;
     layer.conv_output_width = (input_width + 2 * layer.pads - layer.kernel_width) / layer.strides + 1;
     
-    layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
     input_height = std::floor((layer.conv_input_height + 2 * layer.pads - layer.dilations * (layer.kernel_height - 1) - 1) / layer.strides + 1);
     input_width = std::floor((layer.conv_input_width + 2 * layer.pads - layer.dilations * (layer.kernel_width - 1) - 1) / layer.strides + 1);
   
     return;
   }
 
-  tensor2d extract2DTensorData(const onnx::TensorProto& tensor) {
+  tensor2d extract2DTensorData(const onnx::TensorProto& tensor, const bool isTrans) {
     tensor1d flat_data = extract1DTensorData(tensor);
 
     // convert 1D tensor to 2D tensor
-    size_t num_rows = tensor.dims(0);
-    size_t num_cols = tensor.dims(1);
-
+    // row: output, col: input
+    size_t num_rows, num_cols;
+    if (isTrans) {
+      num_rows = tensor.dims(1);
+      num_cols = tensor.dims(0);
+    }
+    else {
+      num_rows = tensor.dims(0);
+      num_cols = tensor.dims(1);
+    }
+    
     // allocate 2D tensor
     tensor2d data(num_rows, tensor1d(num_cols, 0.0f));
     for (size_t r = 0; r < num_rows; ++r) {

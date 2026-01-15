@@ -108,19 +108,14 @@ class OnnxParser {
   battery::vector<Layer> layers;
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
+  SolverOutput<Allocator>& output;
 
  public:
-  OnnxParser() : error(false), silent(false) {}
+  OnnxParser(SolverOutput<Allocator>& output) : error(false), silent(false), output(output) {}
 
   F parse(const std::string& onnx_model_directory) {
-    onnx::ModelProto model;
     std::ifstream input(onnx_model_directory, std::ios::in | std::ios::binary);
-
-    if (!input) {
-      std::cerr << "Failed to open: " + onnx_model_directory << std::endl;
-      error = true;
-      return F::make_false();
-    }
+    onnx::ModelProto model;
 
     if (!model.ParseFromIstream(&input)) {
       std::cerr << "Failed to parse onnx file." << std::endl;
@@ -316,14 +311,16 @@ class OnnxParser {
 
   void make_neurons(Layer& layer, bool isOutputLayer) {
     if (isOutputLayer){
-      // NOTE: rename the variables at the output layer as starting by Y
+      // NOTE: rename the variables at the output layer as starting by Y, which would be the same definition in vnnlib file.
       for (size_t i = 0; i < layer.size; ++i) {
         layer.neurons.push_back("Y_" + std::to_string(i));
+        output.add_var("Y_" + std::to_string(i));
       }
     }
     else {
       for (size_t i = 0; i < layer.size; ++i) {
         layer.neurons.push_back("X_" + std::to_string(layer.id) + "_" + std::to_string(i + 1));
+        output.add_var("X_" + std::to_string(layer.id) + "_" + std::to_string(i + 1));
       }
     }
     return;
@@ -333,6 +330,7 @@ class OnnxParser {
     FSeq seq; 
     for (size_t i = 0; i < input_layer.size; ++i) { 
       input_layer.neurons.push_back("X_" + std::to_string(i));
+      output.add_var("X_" + std::to_string(i));
       auto var = F::make_exists(UNTYPED, LVar<allocator_type>(input_layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
     }
@@ -429,7 +427,7 @@ class OnnxParser {
   }
 
   F make_add_node(const Layer& layer) {
-    assert(layer.source_layers.size() >= 1);
+    assert(layer.source_layers.size() == 1);
     FSeq seq;
     for (size_t i = 0; i < layer.size; ++i) {
       // create variable 
@@ -437,12 +435,16 @@ class OnnxParser {
       seq.push_back(std::move(var));
 
       FSeq rhs; 
-      for (size_t sidx = 0; sidx < layer.source_layers.size(); ++sidx) {
-        // In some cases, add node would have multiple source layers.
-        for (size_t j = 0; j < layers[layer.source_layers[sidx]].size; ++j){
-          rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[j])));
-        }
-      }
+      // BUG: This is used for when we have multiple source layers.
+      //      But, it has some issues, the model is not built correctly.
+      //      So, just keep it simple, only consider the usual cases in feed-forward neural networks.
+      // for (size_t sidx = 0; sidx < layer.source_layers.size(); ++sidx) {
+      //   // In some cases, add node would have multiple source layers.
+      //   for (size_t j = 0; j < layers[layer.source_layers[sidx]].size; ++j){
+      //     rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[sidx]].neurons[j])));
+      //   }
+      // }
+      rhs.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])));
       rhs.push_back(F::make_real(layer.biases[i], layer.biases[i]));
 
       seq.push_back(F::make_binary(
@@ -886,14 +888,20 @@ class OnnxParser {
 }  // namespace impl
 
 template <class Allocator>
-TFormula<Allocator> parse_onnx_str(const std::string& input) {
-  impl::OnnxParser<Allocator> parser;
+TFormula<Allocator> parse_onnx_str(const std::string& input, SolverOutput<Allocator>& output) {
+  impl::OnnxParser<Allocator> parser(output);
   return parser.parse(input);
 }
 
 template <class Allocator>
-TFormula<Allocator> parse_onnx(const std::string& filename) {
-  return parse_onnx_str<Allocator>(filename);
+TFormula<Allocator> parse_onnx(const std::string& filename, SolverOutput<Allocator>& output) {
+  std::ifstream input(filename, std::ios::in | std::ios::binary);
+  if (!input) {
+    std::cerr << "Failed to open: " + filename << std::endl;
+    return TFormula<Allocator>::make_false();
+  }
+
+  return parse_onnx_str<Allocator>(filename, output);
 }
 }  // namespace lala
 

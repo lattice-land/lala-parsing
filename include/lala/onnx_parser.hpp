@@ -148,7 +148,6 @@ class OnnxParser {
 
     FSeq seq;
     // Create an input layer.
-    layers.reserve(graph.node_size());
     Layer input_layer;
     input_layer.id = layers.size();
     input_layer.type = LayerType::Input;
@@ -156,7 +155,7 @@ class OnnxParser {
     input_layer.input_height = input_height;
     input_layer.input_width = input_width;
     seq.push_back(std::move(make_input_node(input_layer)));
-    layers.emplace_back(input_layer);
+    layers.push_back(input_layer);
 
     // Iterate over nodes in the network graph
     std::unordered_map<std::string, size_t> layer_index_map; // key: input node name, value: its layer index
@@ -191,10 +190,14 @@ class OnnxParser {
           } 
           else if (tensor.dims().size() == 2) {
             extractIntAttributes(node, layer);
+            extractFloatAttributes(node, layer);
             // weight 2d tensor
             // In this case, layer type can be either "MatMul" or "Gemm".
             if (layer.type == LayerType::MatMul) layer.weights = extract2DTensorData(tensor, i == 1);
-            else if (layer.type == LayerType::Gemm) layer.weights = extract2DTensorData(tensor, layer.transB);
+            else if (layer.type == LayerType::Gemm) {
+              layer.transB = false;
+              layer.weights = extract2DTensorData(tensor, layer.transB);
+            }
           } 
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Sub) {
             layer.sub_values = extract1DTensorData(tensor);
@@ -248,7 +251,7 @@ class OnnxParser {
       make_neurons(layer, graph.output()[0].name() == node.output()[0].c_str());
       seq.push_back(std::move(make_node(layer)));
       // store into list of layers
-      layers.emplace_back(layer);
+      layers.push_back(layer);
     }
 
     google::protobuf::ShutdownProtobufLibrary();
@@ -506,8 +509,6 @@ class OnnxParser {
   F make_conv_node(const Layer& layer) {
     // This function is super slow and takes a lot of memory space, not sure the reason yet.
     assert(layer.source_layers.size() == 1);
-    const size_t input_size = layer.input_channels * layer.conv_input_height * layer.conv_input_width;
-    const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
 
     FSeq seq;
     // seq.reserve(output_size * 2);
@@ -517,6 +518,7 @@ class OnnxParser {
         for (size_t ow = 0; ow < layer.conv_output_width; ++ow) {
 #ifndef NDEBUG
           // bound check for now (defensive)
+          const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
           if (row >= output_size) {
             std::cerr << "ERROR: row >= output_size: row=" << row << "output_size=" << output_size << std::endl;
             assert(false);
@@ -539,6 +541,7 @@ class OnnxParser {
                   size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
 #ifndef NDEBUG
                   // defensive check for col bounds
+                  const size_t input_size = layer.input_channels * layer.conv_input_height * layer.conv_input_width;
                   if (col >= input_size) {
                     std::cerr << "ERROR: computed col out of range: col=" << col << " input_size=" << input_size 
                               << " (oc,ic,oh,ow,kh,kw)=(" << oc << "," << ic << "," << oh << "," << ow << "," << kh << "," << kw << ")\n";
@@ -577,7 +580,7 @@ class OnnxParser {
 
       // x' = max(0, x)
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])), 
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])),
           EQ,
           F::make_binary(
               F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i])),
@@ -590,17 +593,15 @@ class OnnxParser {
   F make_maxpool_node(const Layer& layer) {
     // This function is super slow and takes a lot of memory space, not sure the reason yet.
     assert(layer.source_layers.size() == 1);
-    const size_t input_size = layer.input_channels * layer.conv_input_height * layer.conv_input_width;
-    const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
 
     FSeq seq;
-    seq.reserve(output_size * 2);
     size_t row = 0;
     for (size_t oc = 0; oc < layer.output_channels; ++oc) {
       for (size_t oh = 0; oh < layer.conv_output_height; ++oh) {
         for (size_t ow = 0; ow < layer.conv_output_width; ++ow) {
 #ifndef NDEBUG
           // bound check for now (defensive)
+          const size_t output_size = layer.output_channels * layer.conv_output_height * layer.conv_output_width;
           if (row >= output_size) {
             std::cerr << "ERROR: row >= output_size: row=" << row << "output_size=" << output_size << std::endl;
             assert(false);
@@ -608,7 +609,7 @@ class OnnxParser {
 #endif
           // create variable
           auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[row]), So(So::Real));
-          seq.emplace_back(std::move(var));
+          seq.push_back(std::move(var));
 
           FSeq max_seq;
           for (size_t ic = 0; ic < layer.input_channels; ++ic) {
@@ -622,6 +623,7 @@ class OnnxParser {
                   size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
 #ifndef NDEBUG
                   // defensive check for col bounds
+                  const size_t input_size = layer.input_channels * layer.conv_input_height * layer.conv_input_width;
                   if (col >= input_size) {
                     std::cerr << "ERROR: computed col out of range: col=" << col << " input_size=" << input_size 
                               << " (oc,ic,oh,ow,kh,kw)=(" << oc << "," << ic << "," << oh << "," << ow << "," << kh << "," << kw << ")\n";
@@ -633,7 +635,7 @@ class OnnxParser {
               }
             }
           }
-          seq.emplace_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[row])), EQ, F::make_nary(MAX, std::move(max_seq))));
+          seq.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[row])), EQ, F::make_nary(MAX, std::move(max_seq))));
           ++row;
         }
       }
@@ -702,8 +704,8 @@ class OnnxParser {
     return;
   }
 
-  void extractFloatAttributes(const onnx::NodeProto* node, Layer& layer) {
-    for (const auto& attr : node->attribute()) {
+  void extractFloatAttributes(const onnx::NodeProto& node, Layer& layer) {
+    for (const auto& attr : node.attribute()) {
       if (attr.floats_size() > 0) {
         const std::string& attr_name = attr.name();
         if (attr_name == "alpha") { layer.alpha = attr.floats()[0]; }
@@ -775,14 +777,8 @@ class OnnxParser {
     // convert 1D tensor to 2D tensor
     // row: output, col: input
     size_t num_rows, num_cols;
-    if (isTrans) {
-      num_rows = tensor.dims(1);
-      num_cols = tensor.dims(0);
-    }
-    else {
-      num_rows = tensor.dims(0);
-      num_cols = tensor.dims(1);
-    }
+    num_rows = tensor.dims(0);
+    num_cols = tensor.dims(1);
     
     // allocate 2D tensor
     tensor2d data(num_rows, tensor1d(num_cols, 0.0f));
@@ -790,6 +786,16 @@ class OnnxParser {
       for (size_t c = 0; c < num_cols; ++c) {
         data[r][c] = flat_data[r * num_cols + c];
       }
+    }
+
+    if (isTrans) {
+      tensor2d data2(num_cols, tensor1d(num_rows, 0.0f));
+      for (size_t r = 0; r < num_rows; ++r) {
+        for (size_t c = 0; c < num_cols; ++c) {
+          data2[c][r] = data[r][c];
+        }
+      }
+      return data2;
     }
 
     return data;

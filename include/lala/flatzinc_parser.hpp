@@ -479,8 +479,8 @@ public:
       if (name == "set_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       if (name == "set_lt") { return make_binary(LT, sv); }
       if (name == "set_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
-      if (name == "float_abs") { return make_binary_fun_eq(ABS, sv); }
-      if (name == "float_neg") { return make_binary_fun_eq(NEG, sv); }
+      if (name == "float_abs") { return make_unary_fun_eq(ABS, sv); }
+      if (name == "float_neg") { return make_unary_fun_eq(NEG, sv); }
       if (name == "float_plus") { return make_binary_fun_eq(ADD, sv); }
       if (name == "float_minus") { return make_binary_fun_eq(SUB, sv); }
       if (name == "float_times") { return make_binary_fun_eq(MUL, sv); }
@@ -499,6 +499,8 @@ public:
       if (name == "float_div") { return make_binary(DIV, sv); }
       if (name == "float_eq") { return make_binary(EQ, sv); }
       if (name == "float_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
+      if (name == "float_ge") { return make_binary(GEQ, sv); }
+      if (name == "float_gt") { return make_binary(GT, sv); }
       if (name == "float_le") { return make_binary(LEQ, sv); }
       if (name == "float_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       if (name == "float_ne") { return make_binary(NEQ, sv); }
@@ -596,8 +598,8 @@ public:
         if (name == "set_intersect") { return make_binary_fun(INTERSECTION, sv); }
         if (name == "set_union") { return make_binary_fun(UNION, sv); }
         if (name == "set_symdiff") { return make_binary_fun(SYMMETRIC_DIFFERENCE, sv); }
-        if (name == "float_abs") { return make_binary_fun(ABS, sv); }
-        if (name == "float_neg") { return make_binary_fun(NEG, sv); }
+        if (name == "float_abs") { return make_unary_fun(ABS, sv); }
+        if (name == "float_neg") { return make_unary_fun(NEG, sv); }
         if (name == "float_plus") { return make_binary_fun(ADD, sv); }
         if (name == "float_minus") { return make_binary_fun(SUB, sv); }
         if (name == "float_times") { return make_binary_fun(MUL, sv); }

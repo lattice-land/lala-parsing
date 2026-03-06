@@ -132,7 +132,8 @@ public:
       }
       printf("[");
       for(int j = 0; j < array_vars.size(); ++j) {
-        simplifier.print_variable(array_vars[j], env, sol);
+        // simplifier.print_variable(array_vars[j], env, sol);
+        simplifier.print_interval(array_vars[j], env, sol);
         if(j+1 != array_vars.size()) {
           printf(",");
         }

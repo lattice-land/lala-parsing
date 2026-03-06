@@ -82,7 +82,7 @@ public:
       Real        <- < (
            'inf'
          / '-inf'
-         / [+-]? [0-9]+ (('.' (&'..' / !'.') [0-9]*) / ([Ee][+-]?[0-9]+)) ) >
+         / [+-]? [0-9]+ (('.' (&'..' / !'.') [0-9]+([Ee][+-][0-9]+)?) / ([Ee][+-]?[0-9]+)) ) >
       Integer     <- < [+-]? [0-9]+ >
       Set         <- '{' '}' / '{' InnerRangeLiteral (',' InnerRangeLiteral)* '}'
       InnerSetRange    <- Literal '..' Literal

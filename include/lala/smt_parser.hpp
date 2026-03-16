@@ -3,6 +3,7 @@
 #ifndef LALA_PARSING_SMT_PARSER_HPP
 #define LALA_PARSING_SMT_PARSER_HPP
 
+#include "peglib.h"
 #include <any>
 #include <cassert>
 #include <cstddef>
@@ -15,8 +16,7 @@
 
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
-#include "peglib.h"
-
+#include "flatzinc_parser.hpp"
 
 namespace lala {
 
@@ -61,7 +61,7 @@ class SMTParser {
 
     parser["Statements"] = [this](const SV& sv) { return make_statements(sv); };
     parser["Integer"] = [](const SV& sv) { return F::make_z(sv.token_to_number<logic_int>()); };
-    parser["Real"] = [](const SV& sv) { return F::make_real(string_to_real(sv.token_to_string())); };
+    parser["Real"] = [](const SV& sv) { return F::make_real(impl::string_to_real(sv.token_to_string())); };
     parser["Identifier"] = [](const SV& sv) { return sv.token_to_string(); };
     parser["BinaryOp"] = [](const SV& sv) { return sv.token_to_string(); };
     parser["LogicOp"] = [](const SV& sv) { return sv.token_to_string(); };

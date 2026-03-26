@@ -38,7 +38,7 @@ class SMTParser {
 
   F parse(const std::string& input) {
 			peg::parser parser(R"(
-				Statements    <- (DeclareVar / Assertion / Comment)+
+				Statements    <- (DeclareVar / DeclareFun / Assertion / Comment)+
 
 				Integer       <- < [+-]?[0-9]+ >
 				Real          <- < ('inf' / '-inf' /
@@ -46,13 +46,20 @@ class SMTParser {
 														([Ee][+-]?[0-9]+)) ) >
 				Identifier    <- < [a-zA-Z_][a-zA-Z0-9_]* >
 
-				BinaryOp      <- < '<=' / '>=' >
+				BinaryOp      <- < '<=' / '>=' / '=' / '>' / '<' >
 				LogicOp       <- < 'and' / 'or' >
+				ArithOp       <- < '+' / '-' / '*' / '/' >
+
+				Term          <- Neg / Arith / Real / Integer / Identifier
+				Neg           <- '(' '-' Term ')'
+				Arith         <- '(' ArithOp Term Term ')'
 
 				DeclareVar    <- '(' 'declare-const' Identifier 'Real' ')'
-				Bound         <- '(' BinaryOp Identifier (Real / Integer / Identifier) ')'
-				Constraint    <- '(' LogicOp Bound* ')'
-				Assertion     <- '(' 'assert' Bound ')' / '(' 'assert' '(' LogicOp+ Constraint* '))'
+				DeclareFun    <- '(' 'declare-fun' Identifier '(' ')' 'Real' ')'
+        Formula       <- Bound / Constraint
+        Bound         <- '(' BinaryOp Term Term ')'
+        Constraint    <- '(' LogicOp Formula+ ')'
+        Assertion     <- '(' 'assert' Formula ')'
 
 				~Comment       <- ';' [^\n\r]* [ \n\r\t]*
 				%whitespace   <- [ \n\r\t]*
@@ -65,8 +72,13 @@ class SMTParser {
     parser["Identifier"] = [](const SV& sv) { return sv.token_to_string(); };
     parser["BinaryOp"] = [](const SV& sv) { return sv.token_to_string(); };
     parser["LogicOp"] = [](const SV& sv) { return sv.token_to_string(); };
+    parser["ArithOp"] = [](const SV& sv) { return sv.token_to_string(); };
     parser["DeclareVar"] = [this](const SV& sv) { return make_variable_decl(sv); };
+    parser["DeclareFun"] = [this](const SV& sv) { return make_variable_decl(sv); };
+    parser["Neg"] = [this](const SV& sv) { return make_neg(sv); };
+    parser["Arith"] = [this](const SV& sv) { return make_arith(sv); };
     parser["Bound"] = [this](const SV& sv) { return make_bound(sv); };
+    parser["Formula"] = [this](const SV& sv) { return f(sv[0]); };
     parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
     parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
@@ -114,51 +126,59 @@ class SMTParser {
     return F::make_true(); 
   }
 
+  F any_to_termF(const std::any& any) {
+    try {
+      return f(any);
+    } catch (const std::bad_any_cast&) {
+      auto name = std::any_cast<std::string>(any);
+      return F::make_lvar(UNTYPED, LVar<allocator_type>(name.data()));
+    }
+  }
+
+  F make_arith(const SV& sv) {
+    auto arith_operator = std::any_cast<std::string>(sv[0]);
+    Sig sig;
+    if(arith_operator == "+") sig = ADD;
+    else if(arith_operator == "-") sig = SUB;
+    else if(arith_operator == "*") sig = MUL;
+    else {
+      assert(arith_operator == "/");
+      sig = DIV;
+    }
+    return F::make_binary(any_to_termF(sv[1]), sig, any_to_termF(sv[2]));
+  }
+
+  F make_neg(const SV& sv) {
+    return F::make_unary(NEG, any_to_termF(sv[0]));
+  }
+
   F make_bound(const SV& sv) {
     auto binary_operator = std::any_cast<std::string>(sv[0]);
-    auto name = std::any_cast<std::string>(sv[1]);
-
-    try {
-      if (binary_operator == "<=") {
-        return F::make_binary(
-					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
-					LEQ,
-					f(sv[2]));
-      } 
-      else {
-        assert (binary_operator == ">=");
-        return F::make_binary(
-					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
-					GEQ,
-					f(sv[2]));
-      }
-    } catch (std::bad_any_cast) {
-      auto name2 = std::any_cast<std::string>(sv[2]);
-      if (binary_operator == "<=") {
-        return F::make_binary(
-					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
-					LEQ,
-					F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
-      } 
-      else {
-        assert (binary_operator == ">=");
-        return F::make_binary(
-					F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), 
-					GEQ,
-					F::make_lvar(UNTYPED, LVar<allocator_type>(name2.data())));
-      }
+    Sig sig;
+    if (binary_operator == "=") sig = EQ;
+    else if (binary_operator == "<=") sig = LEQ;
+    else if (binary_operator == ">=") sig = GEQ;
+    else if (binary_operator == ">") sig = GT;
+    else {
+      assert(binary_operator == "<");
+      sig = LT;
     }
+
+    return F::make_binary(any_to_termF(sv[1]), sig, any_to_termF(sv[2]));
   }
 
   F make_constraint(const SV& sv) {
     auto logic_operator = std::any_cast<std::string>(sv[0]);
-    // We suppose the logic operator is always "and" for now.
     FSeq seq;
     for (int i = 1; i < sv.size(); ++i) {
       seq.push_back(f(sv[i]));
     }
 
-    return F::make_nary(AND, std::move(seq));
+    if (logic_operator == "and") {
+      return F::make_nary(AND, std::move(seq));
+    } else {
+      return F::make_nary(OR, std::move(seq));
+    }
   }
 
   F make_assertion(const SV& sv) {

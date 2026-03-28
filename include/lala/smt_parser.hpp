@@ -12,9 +12,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
-#include <system_error>
 
-#include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
 #include "flatzinc_parser.hpp"
 

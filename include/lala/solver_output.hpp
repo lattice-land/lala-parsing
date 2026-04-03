@@ -12,7 +12,8 @@ namespace lala {
 enum class OutputType {
   XCSP,
   FLATZINC,
-  NNV
+  NNV,
+  SMT2
 };
 
 template<class Allocator>
@@ -173,6 +174,9 @@ public:
       print_solution_xml(env, sol, simplifier);
     }
     else if (type == OutputType::NNV) {
+      print_solution_nnv(env, sol, simplifier);
+    }
+    else if (type == OutputType::SMT2) {
       print_solution_nnv(env, sol, simplifier);
     }
   }

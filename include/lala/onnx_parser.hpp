@@ -74,6 +74,7 @@ struct Layer {
   tensor2d weights;
   tensor4d conv_weights;
 
+  size_t batch_size;
   size_t input_dim;
   size_t output_dim;
 
@@ -156,6 +157,8 @@ class OnnxParser {
     input_layer.id = layers.size();
     input_layer.type = LayerType::Input;
     input_layer.size = input_dimensions;
+    input_layer.batch_size = batch_size;
+    input_layer.input_channels = input_channels;
     input_layer.input_height = input_height;
     input_layer.input_width = input_width;
     seq.push_back(std::move(make_input_node(input_layer)));
@@ -168,6 +171,8 @@ class OnnxParser {
       Layer layer;
       layer.id = layers.size();
       layer.type = setLayerType(node);
+      layer.batch_size = batch_size;
+      layer.input_channels = input_channels;
 #ifndef NDEBUG
       std::cout << "Node: " << node.output()[0] << "| OpType: " << node.op_type() << std::endl;
 #endif
@@ -242,7 +247,6 @@ class OnnxParser {
         else if (layer.type == LayerType::Dropout) { layer.source_layers.push_back(layer_index_map[input_name]); }
         else if (layer.type == LayerType::BatchNormalization){ layer.source_layers.push_back(layer_index_map[input_name]); } 
         else if (layer.type == LayerType::Pad) { 
-          std::cout << "Pad layer found" << std::endl;
           extractIntAttributes(node, layer);
           extractFloatAttributes(node, layer);
           extractStringAttributes(node, layer);
@@ -303,7 +307,19 @@ class OnnxParser {
     else if (layer.type == LayerType::MaxPool) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }
     else if (layer.type == LayerType::Dropout) { layer.size = layers[layer.source_layers[0]].size; }
     else if (layer.type == LayerType::BatchNormalization) { layer.size = layers[layer.source_layers[0]].size; }
-    else if (layer.type == LayerType::Pad) { layer.size = layers[layer.source_layers[0]].size; }
+    else if (layer.type == LayerType::Pad) {
+      if (layers[layer.source_layers[0]].type == LayerType::Input) {
+        size_t source_batch_size = layers[layer.source_layers[0]].batch_size;
+        size_t source_channels = layers[layer.source_layers[0]].input_channels;
+        size_t source_height = layers[layer.source_layers[0]].input_height;
+        size_t source_width = layers[layer.source_layers[0]].input_width;
+
+        layer.size = (source_batch_size + layer.pads[0]) * (source_channels + layer.pads[1]) * (source_height + layer.pads[2]) * (source_width + layer.pads[3]); 
+      }
+      else {
+        layer.size = layers[layer.source_layers[0]].size;
+      }
+    }
     else return false;
 
     return true;
@@ -699,7 +715,7 @@ class OnnxParser {
 
   F make_pad_node(const Layer& layer) {
     assert(layer.source_layers.size() == 1);
-    // TODO: Implement this function.
+
 
     return F::make_true();
   }

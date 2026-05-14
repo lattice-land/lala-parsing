@@ -38,6 +38,7 @@ enum class LayerType {
   Conv,
   Flatten,
   Relu,
+  Pad,
   MaxPool,           
   BatchNormalization, 
   Dropout,            
@@ -61,6 +62,11 @@ struct Layer {
   // for leaky relu, in GNN, we will need this parameter.
   float alpha; 
 
+  // for pads nodes 
+  tensor1d pads; // this is also for Conv nodes.
+  std::string pads_mode;
+  float pads_value;
+
   tensor1d sub_values;
   tensor1d div_values;
 
@@ -68,14 +74,14 @@ struct Layer {
   tensor2d weights;
   tensor4d conv_weights;
 
+  size_t batch_size;
   size_t input_dim;
   size_t output_dim;
 
   size_t input_height;
   size_t input_width;
 
-  size_t kernel_height;
-  size_t kernel_width;
+  tensor1d kernel_shape;
 
   size_t input_channels;
   size_t output_channels;
@@ -85,10 +91,9 @@ struct Layer {
   size_t conv_output_height;
   size_t conv_output_width;
 
-  size_t dilations;
+  tensor1d dilations;
   size_t group;
-  size_t pads;
-  size_t strides;
+  tensor1d strides;
   bool transA;
   bool transB;
 };
@@ -108,10 +113,12 @@ class OnnxParser {
   battery::vector<Layer> layers;
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
+
+  battery::vector<std::string, Allocator>& input_neurons;
   SolverOutput<Allocator>& output;
 
  public:
-  OnnxParser(SolverOutput<Allocator>& output) : error(false), silent(false), output(output) {}
+  OnnxParser(battery::vector<std::string, Allocator>& input_neurons, SolverOutput<Allocator>& output) : error(false), silent(false), input_neurons(input_neurons), output(output) {}
 
   F parse(const std::string& onnx_model_directory) {
     std::ifstream input(onnx_model_directory, std::ios::in | std::ios::binary);
@@ -140,11 +147,18 @@ class OnnxParser {
     // Shape of input.
     const onnx::ValueInfoProto& graph_input = graph.input(0);
     const auto& input_shape = graph_input.type().tensor_type().shape();  // <batch_size, num_input_channels, input_H, input_W>;
-    size_t batch_size = input_shape.dim(0).dim_value();
+    size_t batch_size = input_shape.dim(0).dim_value() != 0 ? input_shape.dim(0).dim_value() : 1;
     size_t input_channels = input_shape.dim().size() > 1 ? input_shape.dim(1).dim_value() : 1;
     size_t input_height = input_shape.dim().size() > 2 ? input_shape.dim(2).dim_value() : 1;
     size_t input_width = input_shape.dim().size() > 3 ? input_shape.dim(3).dim_value() : 1;
     size_t input_dimensions = batch_size * input_channels * input_height * input_width;  // number of input neurons.
+#ifndef NDEBUG
+    printf("batch_size = %d\n", batch_size);
+    printf("input_channels = %d\n", input_channels);
+    printf("input_height = %d\n", input_height);
+    printf("input_width = %d\n", input_width);
+    printf("input_dimensions = %d\n", input_dimensions);
+#endif
 
     FSeq seq;
     // Create an input layer.
@@ -152,6 +166,8 @@ class OnnxParser {
     input_layer.id = layers.size();
     input_layer.type = LayerType::Input;
     input_layer.size = input_dimensions;
+    input_layer.batch_size = batch_size;
+    input_layer.input_channels = input_channels;
     input_layer.input_height = input_height;
     input_layer.input_width = input_width;
     seq.push_back(std::move(make_input_node(input_layer)));
@@ -164,6 +180,10 @@ class OnnxParser {
       Layer layer;
       layer.id = layers.size();
       layer.type = setLayerType(node);
+      layer.batch_size = batch_size;
+      layer.input_channels = input_channels;
+      layer.input_height = input_height;
+      layer.input_width = input_width;
 #ifndef NDEBUG
       std::cout << "Node: " << node.output()[0] << "| OpType: " << node.op_type() << std::endl;
 #endif
@@ -177,7 +197,6 @@ class OnnxParser {
       // Note: in some networks, there is no node name, but the output name is always well defined. 
       //       So we use output name to match the layer index except input layer.
       layer_index_map[node.output()[0]] = layer.id; 
-      // for (const auto& input_name : node.input()) {
       for (size_t i = 0; i < node.input().size(); ++i) {
         const std::string input_name = node.input()[i];
         if (tensor_map.find(input_name) != tensor_map.end()) {
@@ -201,20 +220,16 @@ class OnnxParser {
           } 
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Sub) {
             layer.sub_values = extract1DTensorData(tensor);
-            layer.input_height = layers[0].input_height;
-            layer.input_width = layers[0].input_width;
             layer.source_layers.push_back(layer_index_map[input_name]);
           }
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Div) {
             layer.div_values = extract1DTensorData(tensor);
-            layer.input_height = layers[0].input_height;
-            layer.input_width = layers[0].input_width;
             layer.source_layers.push_back(layer_index_map[input_name]);
           }
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Conv) {
             extractIntAttributes(node, layer);
             layer.conv_weights = extract4DTensorData(tensor);
-            // layer.weights = convert4Dto2DTensor(layer.conv_weights, input_height, input_width, layer.strides, layer.pads); // This is very slow and waste lots of memory for sparse matrix.
+            // layer.weights = convert4Dto2DTensor(layer.conv_weights, input_height, input_width, layer.strides, layer.pads, layer.dilations); // This is very slow and waste lots of memory for sparse matrix.
             updateConvMaxPoolLayerInfo(layer, input_height, input_width);
           }
           else { 
@@ -237,6 +252,12 @@ class OnnxParser {
         else if (layer.type == LayerType::Add) { layer.source_layers.push_back(layer_index_map[input_name]); }  
         else if (layer.type == LayerType::Dropout) { layer.source_layers.push_back(layer_index_map[input_name]); }
         else if (layer.type == LayerType::BatchNormalization){ layer.source_layers.push_back(layer_index_map[input_name]); } 
+        else if (layer.type == LayerType::Pad) { 
+          extractIntAttributes(node, layer);
+          extractFloatAttributes(node, layer);
+          extractStringAttributes(node, layer);
+          layer.source_layers.push_back(layer_index_map[input_name]); 
+        }
       }
 
 #ifndef NDEBUG
@@ -275,6 +296,7 @@ class OnnxParser {
     else if (node.op_type() == "MaxPool") { return LayerType::MaxPool; }
     else if (node.op_type() == "Dropout") { return LayerType::Dropout; }
     else if (node.op_type() == "BatchNormalization") { return LayerType::BatchNormalization; }
+    else if (node.op_type() == "Pad") { return LayerType::Pad; }
     else { return LayerType::Unknown; }
   }
 
@@ -291,6 +313,23 @@ class OnnxParser {
     else if (layer.type == LayerType::MaxPool) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }
     else if (layer.type == LayerType::Dropout) { layer.size = layers[layer.source_layers[0]].size; }
     else if (layer.type == LayerType::BatchNormalization) { layer.size = layers[layer.source_layers[0]].size; }
+    else if (layer.type == LayerType::Pad) {
+      if (layers[layer.source_layers[0]].type == LayerType::Input) {
+        size_t source_batch_size = layers[layer.source_layers[0]].batch_size;
+        size_t source_channels = layers[layer.source_layers[0]].input_channels;
+        size_t source_height = layers[layer.source_layers[0]].input_height;
+        size_t source_width = layers[layer.source_layers[0]].input_width;
+
+        layer.batch_size = source_batch_size + layer.pads[0] + layer.pads[4];
+        layer.input_channels = source_channels + layer.pads[1] + layer.pads[5];
+        layer.input_height = source_height + layer.pads[2] + layer.pads[6];
+        layer.input_width = source_width + layer.pads[3] + layer.pads[7];
+        layer.size = layer.batch_size * layer.input_channels * layer.input_height * layer.input_width; 
+      }
+      else {
+        layer.size = layers[layer.source_layers[0]].size;
+      }
+    }
     else return false;
 
     return true;
@@ -309,6 +348,7 @@ class OnnxParser {
     else if (layer.type == LayerType::MaxPool) { return make_maxpool_node(layer); }
     else if (layer.type == LayerType::Dropout) { return make_dropout_node(layer); }
     else if (layer.type == LayerType::BatchNormalization) { return make_batch_normalization_node(layer); }
+    else if (layer.type == LayerType::Pad) { return make_pad_node(layer); }
     else { return F::make_false(); }
   }
 
@@ -332,8 +372,10 @@ class OnnxParser {
   F make_input_node(Layer &input_layer) {
     FSeq seq; 
     for (size_t i = 0; i < input_layer.size; ++i) { 
-      input_layer.neurons.push_back("X_" + std::to_string(i));
-      output.add_var("X_" + std::to_string(i));
+      std::string name = "X_" + std::to_string(i);
+      input_layer.neurons.push_back(name);
+      input_neurons.push_back(name);
+      output.add_var(name);
       auto var = F::make_exists(UNTYPED, LVar<allocator_type>(input_layer.neurons[i]), So(So::Real));
       seq.push_back(std::move(var));
     }
@@ -529,13 +571,13 @@ class OnnxParser {
           seq.push_back(std::move(var));
 
           FSeq affine;
-          affine.reserve(layer.input_channels * layer.kernel_height * layer.kernel_width + 1);
+          affine.reserve(layer.input_channels * layer.kernel_shape[0] * layer.kernel_shape[1] + 1);
           for (size_t ic = 0; ic < layer.input_channels; ++ic) {
-            for (size_t kh = 0; kh < layer.kernel_height; ++kh) {
-              for (size_t kw = 0; kw < layer.kernel_width; ++kw) {
+            for (size_t kh = 0; kh < layer.kernel_shape[0]; ++kh) {
+              for (size_t kw = 0; kw < layer.kernel_shape[1]; ++kw) {
                 // use signed integers for intermediate coordinates. 
-                int ih = oh * layer.strides + kh - layer.pads;
-                int iw = ow * layer.strides + kw - layer.pads; 
+                int ih = oh * layer.strides[0] + kh - layer.pads[0];
+                int iw = ow * layer.strides[1] + kw - layer.pads[1]; 
 
                 if (ih >= 0 && ih < layer.conv_input_height && iw >= 0 && iw < layer.conv_input_width) {
                   size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
@@ -613,11 +655,11 @@ class OnnxParser {
 
           FSeq max_seq;
           for (size_t ic = 0; ic < layer.input_channels; ++ic) {
-            for (size_t kh = 0; kh < layer.kernel_height; ++kh) {
-              for (size_t kw = 0; kw < layer.kernel_width; ++kw) {
+            for (size_t kh = 0; kh < layer.kernel_shape[0]; ++kh) {
+              for (size_t kw = 0; kw < layer.kernel_shape[1]; ++kw) {
                 // use signed integers for intermediate coordinates. 
-                int ih = oh * layer.strides + kh - layer.pads;
-                int iw = ow * layer.strides + kw - layer.pads; 
+                int ih = oh * layer.strides[0] + kh * layer.dilations[0] - layer.pads[0];
+                int iw = ow * layer.strides[1] + kw * layer.dilations[1] - layer.pads[1]; 
 
                 if (ih >= 0 && ih < layer.conv_input_height && iw >= 0 && iw < layer.conv_input_width) {
                   size_t col = ic * (layer.conv_input_height * layer.conv_input_width) + ih * layer.conv_input_width + iw;
@@ -682,25 +724,108 @@ class OnnxParser {
     }
     return F::make_nary(AND, std::move(seq));
   }
+  
+  F make_pad_node(const Layer& layer) {
+    // 1. 基本檢查
+    assert(layer.source_layers.size() == 1);
+    const Layer& source = layers[layer.source_layers[0]];
+    
+    // 2. 提取 4D Pads (N_beg, C_beg, H_beg, W_beg, N_end, C_end, H_end, W_end)
+    // 你的 MNIST 案例通常是 [0, 0, 1, 1, 0, 0, 2, 2]
+    size_t pad_top    = layer.pads[2]; // H_begin
+    size_t pad_left   = layer.pads[3]; // W_begin
+    // 注意：計算尺寸時已用到 pads[6](H_end) 和 pads[7](W_end)
+    
+    FSeq seq;
+    size_t out_index = 0;
+
+    // 3. 遍歷輸出層的所有神經元 (確保對應到 layer.size)
+    if(source.type == LayerType::Input) {
+      for (size_t i = 0; i < layer.batch_size; ++i) {
+          for (size_t j = 0; j < layer.input_channels; ++j) {
+              for (size_t k = 0; k < layer.input_height; ++k) { // 這是填充後的 H (如 31)
+                  for (size_t l = 0; l < layer.input_width; ++l) { // 這是填充後的 W (如 31)
+                      
+                      // A. 建立當前輸出的變數存在量詞
+                      auto var_decl = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[out_index]), So(So::Real));
+                      seq.push_back(std::move(var_decl));
+                      
+                      auto current_out_var = F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[out_index]));
+
+                      // B. 計算對應到 source 層的座標 (考慮偏移)
+                      int ih = static_cast<int>(k) - static_cast<int>(pad_top);
+                      int iw = static_cast<int>(l) - static_cast<int>(pad_left);
+
+                      // C. 建立連結約束
+                      if (ih >= 0 && ih < static_cast<int>(source.input_height) && 
+                          iw >= 0 && iw < static_cast<int>(source.input_width)) {
+                          
+                          // 落在原始影像內 (例如 ReLU 的輸出)
+                          size_t in_index = i * (source.input_channels * source.input_height * source.input_width)
+                                          + j * (source.input_height * source.input_width)
+                                          + static_cast<size_t>(ih) * source.input_width
+                                          + static_cast<size_t>(iw);
+
+                          seq.push_back(F::make_binary(
+                              current_out_var, 
+                              EQ, 
+                              F::make_lvar(UNTYPED, LVar<allocator_type>(source.neurons[in_index]))
+                          ));
+                      } else {
+                          // 落在 Padding 區域 -> 強制設為 0
+                          seq.push_back(F::make_binary(
+                              current_out_var, 
+                              EQ, 
+                              F::make_real(0.0f, 0.0f) // 建立常數 0 的約束
+                          ));
+                      }
+                      
+                      out_index++;
+                  }
+              }
+          }
+      }
+    }
+    else {
+      for (size_t i = 0; i < layer.size; ++i) {
+        auto var = F::make_exists(UNTYPED, LVar<allocator_type>(layer.neurons[i]), So(So::Real));
+        seq.push_back(std::move(var));
+
+        // x' = x;
+        seq.push_back(F::make_binary(
+          F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])),
+          EQ,
+          F::make_lvar(UNTYPED, LVar<allocator_type>(layers[layer.source_layers[0]].neurons[i]))
+        ));
+      }
+    }
+
+    return F::make_nary(AND, std::move(seq));
+  }
 
   void extractIntAttributes(const onnx::NodeProto& node, Layer& layer) {
     for (const auto& attr : node.attribute()) {
       if (attr.ints_size() > 0) {
         const std::string& attr_name = attr.name();
-        if (attr_name == "dilations") { layer.dilations = attr.ints()[0]; }
+        if (attr_name == "dilations") { extractIntArrayAttributes(attr, layer.dilations); }
         else if (attr_name == "group") { layer.group = attr.ints()[0]; }
-        else if (attr_name == "kernel_shape") {
-          layer.kernel_height = attr.ints()[0];
-          layer.kernel_width = attr.ints()[0];
-        }
-        else if (attr_name == "pads") { layer.pads = attr.ints()[0]; }
-        else if (attr_name == "strides") { layer.strides = attr.ints()[0]; }
+        else if (attr_name == "kernel_shape") { extractIntArrayAttributes(attr, layer.kernel_shape); }
+        else if (attr_name == "pads") { extractIntArrayAttributes(attr, layer.pads); }
+        else if (attr_name == "strides") { extractIntArrayAttributes(attr, layer.strides); }
         else if (attr_name == "transA") { layer.transA = attr.ints()[0]; }
         else if (attr_name == "transB") { layer.transB = attr.ints()[0]; }
         else { std::cout << "Unknown int attribute " << std::endl; }
       }
     }
 
+    return;
+  }
+
+  void extractIntArrayAttributes(const onnx::AttributeProto& attr, tensor1d& data) {
+    size_t size = attr.ints_size();
+    for (size_t i = 0; i < size; ++i) {
+      data.push_back(attr.ints()[i]);
+    }
     return;
   }
 
@@ -713,6 +838,21 @@ class OnnxParser {
         else { std::cout << "Unknown float attribute" << std::endl; }
       }
     } 
+
+    return;
+  }
+
+  void extractStringAttributes(const onnx::NodeProto& node, Layer& layer) {
+    for (const auto& attr : node.attribute()) {
+      if (attr.strings_size() > 0) {
+        const std::string& attr_name = attr.name();
+        if (attr_name == "mode") { 
+          layer.pads_mode = attr.strings()[0]; 
+          if(layer.pads_mode == "constant") { layer.pads_value = 0.0f; }
+        }
+        else { std::cout << "Unknown string attribute" << std::endl; }
+      }
+    }
 
     return;
   }
@@ -760,13 +900,11 @@ class OnnxParser {
     layer.input_channels = layer.conv_weights[0].size();
     layer.conv_input_height = input_height;
     layer.conv_input_width = input_width;
-    layer.kernel_height = layer.conv_weights[0][0].size();
-    layer.kernel_width = layer.conv_weights[0][0][0].size();
-    layer.conv_output_height = (input_height + 2 * layer.pads - layer.kernel_height) / layer.strides + 1;
-    layer.conv_output_width = (input_width + 2 * layer.pads - layer.kernel_width) / layer.strides + 1;
+    layer.conv_output_height = (input_height + layer.pads[0] + layer.pads[2] - layer.kernel_shape[0]) / layer.strides[0] + 1;
+    layer.conv_output_width = (input_width + layer.pads[1] + layer.pads[3] - layer.kernel_shape[1]) / layer.strides[1] + 1;
     
-    input_height = std::floor((layer.conv_input_height + 2 * layer.pads - layer.dilations * (layer.kernel_height - 1) - 1) / layer.strides + 1);
-    input_width = std::floor((layer.conv_input_width + 2 * layer.pads - layer.dilations * (layer.kernel_width - 1) - 1) / layer.strides + 1);
+    input_height = std::floor((layer.conv_input_height + layer.pads[0] + layer.pads[2] - layer.dilations[0] * (layer.kernel_shape[0] - 1) - 1) / layer.strides[0] + 1);
+    input_width = std::floor((layer.conv_input_width + layer.pads[1] + layer.pads[3] - layer.dilations[1] * (layer.kernel_shape[1] - 1) - 1) / layer.strides[1] + 1);
   
     return;
   }
@@ -832,14 +970,14 @@ class OnnxParser {
     return data;
   }
 
-  tensor2d convert4Dto2DTensor(const tensor4d& weights, size_t input_H, size_t input_W, size_t strides, size_t pads) {
+  tensor2d convert4Dto2DTensor(const tensor4d& weights, size_t input_H, size_t input_W, tensor1d strides, tensor1d pads, tensor1d dilations) {
     const size_t output_channels = weights.size();
     const size_t input_channels = weights[0].size();
     const size_t kernel_H = weights[0][0].size();
     const size_t kernel_W = weights[0][0][0].size();
 
-    const size_t output_H = (input_H + 2 * pads - kernel_H) / strides + 1;
-    const size_t output_W = (input_W + 2 * pads - kernel_W) / strides + 1;
+    const size_t output_H = (input_H + pads[0] + pads[2] - kernel_H) / strides[0] + 1;
+    const size_t output_W = (input_W + pads[1] + pads[3] - kernel_W) / strides[1] + 1;
 
     const size_t input_size = input_channels * input_H * input_W;
     const size_t output_size = output_channels * output_H * output_W;
@@ -860,8 +998,8 @@ class OnnxParser {
             for (size_t kh = 0; kh < kernel_H; ++kh) {
               for (size_t kw = 0; kw < kernel_W; ++kw) {
                 // use signed integers for intermediate coordinates
-                int ih = static_cast<int>(oh * strides) + static_cast<int>(kh) - static_cast<int>(pads);
-                int iw = static_cast<int>(ow * strides) + static_cast<int>(kw) - static_cast<int>(pads);
+                int ih = static_cast<int>(oh * strides[0]) + static_cast<int>(kh * dilations[0]) - static_cast<int>(pads[0]);
+                int iw = static_cast<int>(ow * strides[1]) + static_cast<int>(kw * dilations[1]) - static_cast<int>(pads[1]);
 
                 // only write when ih/iw inside input bounds
                 if (ih >= 0 && ih < static_cast<int>(input_H) && iw >= 0 && iw < static_cast<int>(input_W)) {
@@ -894,20 +1032,20 @@ class OnnxParser {
 }  // namespace impl
 
 template <class Allocator>
-TFormula<Allocator> parse_onnx_str(const std::string& input, SolverOutput<Allocator>& output) {
-  impl::OnnxParser<Allocator> parser(output);
+TFormula<Allocator> parse_onnx_str(const std::string& input, battery::vector<std::string, Allocator>& input_neurons, SolverOutput<Allocator>& output) {
+  impl::OnnxParser<Allocator> parser(input_neurons, output);
   return parser.parse(input);
 }
 
 template <class Allocator>
-TFormula<Allocator> parse_onnx(const std::string& filename, SolverOutput<Allocator>& output) {
+TFormula<Allocator> parse_onnx(const std::string& filename, battery::vector<std::string, Allocator>& input_neurons, SolverOutput<Allocator>& output) {
   std::ifstream input(filename, std::ios::in | std::ios::binary);
   if (!input) {
     std::cerr << "Failed to open: " + filename << std::endl;
     return TFormula<Allocator>::make_false();
   }
 
-  return parse_onnx_str<Allocator>(filename, output);
+  return parse_onnx_str<Allocator>(filename, input_neurons, output);
 }
 }  // namespace lala
 

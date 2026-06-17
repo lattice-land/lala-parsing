@@ -308,7 +308,7 @@ class OnnxParser {
     else if (layer.type == LayerType::Flatten) { layer.size = layers[layer.source_layers[0]].size; }
     else if (layer.type == LayerType::MatMul) { layer.size = layer.weights[0].size(); }
     else if (layer.type == LayerType::Add) { layer.size = layers[layer.source_layers[0]].size; }
-    else if (layer.type == LayerType::Gemm) { layer.weights[0].size(); }
+    else if (layer.type == LayerType::Gemm) { layer.size = layer.weights[0].size(); }
     else if (layer.type == LayerType::Conv) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }
     else if (layer.type == LayerType::Relu) { layer.size = layers[layer.source_layers[0]].size; }
     else if (layer.type == LayerType::MaxPool) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }

@@ -395,6 +395,16 @@ public:
       return F::make_nary(sig, std::move(seq));
     }
 
+    F make_nary_fun_eq(Sig sig, const SV &sv) {
+      if(sv.size() < 3) {
+        return make_arity_error(sv, sig, 2, static_cast<int>(sv.size()) - 1);
+      }
+      auto left = f(sv[1]);
+      auto right = resolve_array(sv, sv[2]);
+      if(!right.is(F::Seq)) { return right; }
+      return F::make_binary(left, EQ, F::make_nary(sig, right.seq()));
+    }
+
     F make_float_in(const SV &sv) {
       return F::make_binary(
           F::make_binary(f(sv[1]), GEQ, f(sv[2])),
@@ -524,6 +534,14 @@ public:
         || name == "array_float_element" || name == "array_var_float_element")
       {
         return make_element_constraint(name, sv);
+      }
+      if (name == "array_int_minimum" || name == "array_float_minimum")
+      {
+        return make_nary_fun_eq(MIN, sv);
+      }
+      if (name == "array_int_maximum" || name == "array_float_maximum")
+      {
+        return make_nary_fun_eq(MAX, sv);
       }
       if (name == "int_lin_eq" || name == "bool_lin_eq" || name == "float_lin_eq" ||
               name == "int_lin_eq_reif" || name == "bool_lin_eq_reif" || name == "float_lin_eq_reif")

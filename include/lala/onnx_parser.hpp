@@ -306,7 +306,28 @@ class OnnxParser {
     else if (layer.type == LayerType::Div) { layer.size = layer.div_values.size(); }
     else if (layer.type == LayerType::Constant) {}
     else if (layer.type == LayerType::Flatten) { layer.size = layers[layer.source_layers[0]].size; }
-    else if (layer.type == LayerType::MatMul) { layer.size = layer.weights[0].size(); }
+    /** `layer.weights` comes out of `extract2DTensorData(tensor, layer.transB)` with a
+     * DIFFERENT orientation depending on the node type, because that call passes `layer.transB`
+     * unconditionally, but only `Gemm` actually has a `transB` ONNX attribute (`MatMul` doesn't,
+     * so `layer.transB` is always `false` for it):
+     *  - `MatMul` (e.g. NNet-converted models): `layer.transB` is always `false`, so
+     *    `extract2DTensorData` never transposes, and the raw tensor is stored `[out][in]`
+     *    (confirmed empirically: a `[1,2]` weight for a 2-input, 1-output final layer).
+     *    -> `layer.weights.size()` (row count) is `out_features`.
+     *  - `Gemm` (e.g. PyTorch-exported `nn.Linear`, typically `transB=1`): ONNX's Gemm computes
+     *    `A @ (transB ? B^T : B)`, and for `A @ B'` to type-check, the EFFECTIVE `B'` used in the
+     *    multiplication is always `[in][out]`-shaped regardless of `transB` -- `transB` only
+     *    changes whether the RAW stored tensor already has that shape or needs transposing to
+     *    reach it. Since `extract2DTensorData` returns exactly that effective `B'` (transposing
+     *    iff `transB`), `layer.weights` for `Gemm` ends up `[in][out]`-shaped, the opposite of
+     *    `MatMul`. -> `layer.weights[0].size()` (column count) is `out_features` here.
+     * Conflating the two (using the same formula for both) is wrong for whichever one doesn't
+     * match: using the column count for `MatMul` silently used the wrong (previous layer's)
+     * neuron count without crashing on square/larger-output layers, only overflowing once a
+     * layer's output is narrower than its input (a network's final layer, typically); using the
+     * row count for `Gemm` crashes symmetrically. See `make_matmul_node`/`make_gemm_node` for
+     * the matching (and equally node-type-dependent) indexing. */
+    else if (layer.type == LayerType::MatMul) { layer.size = layer.weights.size(); }
     else if (layer.type == LayerType::Add) { layer.size = layers[layer.source_layers[0]].size; }
     else if (layer.type == LayerType::Gemm) { layer.size = layer.weights[0].size(); }
     else if (layer.type == LayerType::Conv) { layer.size = layer.output_channels * layer.conv_output_height * layer.conv_output_width; }
@@ -519,15 +540,18 @@ class OnnxParser {
       seq.push_back(std::move(var));
       hidden_neurons.push_back(layer.neurons[i]);
 
+      /** `layer.weights` here is `[out][in]`-shaped (unlike `make_gemm_node`, see the NOTE in
+       * `setLayerSize`): `i` (this layer's own output index) indexes the OUTER vector and `j`
+       * (the input/previous-layer index) the INNER one. */
       FSeq affine;
       for (size_t j = 0; j < layers[layer.source_layers[0]].size; ++j) {
         affine.push_back(F::make_binary(
-            F::make_real(layer.weights[j][i], layer.weights[j][i]),
+            F::make_real(layer.weights[i][j], layer.weights[i][j]),
             MUL,
             F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[j]))));
       }
       seq.push_back(F::make_binary(
-          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])), 
+          F::make_lvar(UNTYPED,LVar<allocator_type>(layer.neurons[i])),
           EQ,
           F::make_nary(ADD, std::move(affine))));
     }
@@ -542,21 +566,16 @@ class OnnxParser {
       seq.push_back(std::move(var));
       hidden_neurons.push_back(layer.neurons[i]);
 
+      /** Unlike `make_matmul_node`, `layer.weights` here is `[in][out]`-shaped, not
+       * `[out][in]` -- see the NOTE in `setLayerSize` on why `Gemm` and `MatMul` end up with
+       * opposite orientations out of `extract2DTensorData`. So `j` (the input/previous-layer
+       * index) indexes the OUTER vector and `i` (this layer's own output index) the INNER one. */
       FSeq affine;
       for (size_t j = 0; j < layers[layer.source_layers[0]].size; ++j) {
-        // if (layer.transB){
-          affine.push_back(F::make_binary(
-                      F::make_real(layer.weights[j][i], layer.weights[j][i]),
-                      MUL,
-                      F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[j]))));
-        // }
-        // else{
-        //   affine.push_back(F::make_binary(
-        //               F::make_real(layer.weights[i][j], layer.weights[i][j]),
-        //               MUL,
-        //               F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[j]))));
-        // }
-        
+        affine.push_back(F::make_binary(
+                    F::make_real(layer.weights[j][i], layer.weights[j][i]),
+                    MUL,
+                    F::make_lvar(UNTYPED,LVar<allocator_type>(layers[layer.source_layers[0]].neurons[j]))));
       }
       affine.push_back(F::make_real(layer.biases[i], layer.biases[i]));  // bias
       seq.push_back(F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(layer.neurons[i])), 

@@ -114,6 +114,23 @@ class OnnxParser {
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
 
+  /** `MatMul` (unlike `Gemm`) carries no ONNX attribute telling us whether its
+   * weight tensor is `[out][in]` or `[in][out]`-shaped -- that is entirely up
+   * to whichever tool exported the model, and different exporters disagree
+   * (see the NOTE in `setLayerSize`). We auto-detect it once per network, the
+   * first time a `MatMul` layer's weight shape is unambiguous (i.e. its two
+   * dimensions differ, so exactly one of them can match the known previous
+   * layer's neuron count), then reuse that same decision for every other
+   * `MatMul` layer in the network -- including ambiguous (square) ones, where
+   * shape alone can't tell us anything, but a single exporter is expected to
+   * use one convention consistently throughout. `-1` = not yet determined
+   * (defaults to "no transpose", i.e. `[out][in]`, the pre-existing
+   * assumption, if the whole network happens to be ambiguous); `0` = raw
+   * tensor is already `[out][in]`, matching what `make_matmul_node`/
+   * `setLayerSize` expect, no transpose needed; `1` = raw tensor is
+   * `[in][out]` and must be transposed to `[out][in]`. */
+  int matmul_needs_transpose = -1;
+
   battery::vector<std::string, Allocator>& input_neurons;
   battery::vector<std::string, Allocator>& hidden_neurons;
   SolverOutput<Allocator>& output;
@@ -218,7 +235,49 @@ class OnnxParser {
             //   layer.weights = extract2DTensorData(tensor, layer.transB);
             // }
             layer.weights = extract2DTensorData(tensor, layer.transB);
-          } 
+            if (layer.type == LayerType::MatMul && !layer.weights.empty()) {
+              /** Find the OTHER input of this node (the data/previous-layer
+               * one, not this weight tensor) by name, rather than assuming
+               * `layer.source_layers` is already populated -- that depends
+               * on this weight input being processed AFTER the data input in
+               * `node.input()`'s order, which is not guaranteed. */
+              size_t prev_size = 0;
+              bool found_prev = false;
+              for (size_t k = 0; k < node.input().size(); ++k) {
+                const std::string& other_input = node.input()[k];
+                if (other_input != input_name) {
+                  auto it = layer_index_map.find(other_input);
+                  if (it != layer_index_map.end()) {
+                    prev_size = layers[it->second].size;
+                    found_prev = true;
+                    break;
+                  }
+                }
+              }
+              if (found_prev) {
+                size_t rows = layer.weights.size();
+                size_t cols = layer.weights[0].size();
+                if (rows == prev_size && cols != prev_size) {
+                  matmul_needs_transpose = 1;
+                }
+                else if (cols == prev_size && rows != prev_size) {
+                  matmul_needs_transpose = 0;
+                }
+                // else: ambiguous (square weight matrix) or neither dimension
+                // matches -- keep whatever orientation was already
+                // established (or -1/unset) for this network.
+              }
+              if (matmul_needs_transpose == 1) {
+                tensor2d transposed(layer.weights[0].size(), tensor1d(layer.weights.size(), 0.0f));
+                for (size_t r = 0; r < layer.weights.size(); ++r) {
+                  for (size_t c = 0; c < layer.weights[0].size(); ++c) {
+                    transposed[c][r] = layer.weights[r][c];
+                  }
+                }
+                layer.weights = std::move(transposed);
+              }
+            }
+          }
           else if (tensor.dims().size() == 4 && layer.type == LayerType::Sub) {
             layer.sub_values = extract1DTensorData(tensor);
             layer.source_layers.push_back(layer_index_map[input_name]);

@@ -113,7 +113,7 @@ public:
     template <class Alloc, class B, class Env> 
     CUDA void print_interval(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
       const auto& x = *(benv.variable_of(vname));
-      x.sort.print_interval(b.project(x.avars[0]));
+      x.sort.print_interval(b.project(x.avars[0].vid()));
     }
   };
 

@@ -23,7 +23,6 @@ option(LALA_PARSING_BUILD_EXAMPLES "LALA_PARSING_BUILD_EXAMPLES" OFF)
 option(LALA_PARSING_BUILD_DOC "LALA_PARSING_BUILD_DOC" OFF)
 option(LOCAL_DEPS "LOCAL_DEPS" OFF)
 option(WITH_XCSP3PARSER "Add support for parsing XCSP3 .xml files" ON)
-option(WITH_NNV "Add neural network verification related parsing tools" ON)
 
 if(MSVC)
   # XCSP3-CPP-Parser has dependencies on gcc that break MSVC
@@ -70,45 +69,9 @@ endif()
 
 FetchContent_MakeAvailable(lala_core ${XCSP3PARSER} cpp_peglib)
 
-# Preparing the library
-if(WITH_NNV)
-  set(NNV_TOOLS_DIR "${CMAKE_CURRENT_LIST_DIR}/include/lala")
-  set(PROTOBUF_VERSION 3.19.2)
-  set(PROTOBUF_DEFAULT_DIR "${NNV_TOOLS_DIR}/protobuf-${PROTOBUF_VERSION}")
-  if(NOT PROTOBUF_DIR)
-    set(PROTOBUF_DIR "${PROTOBUF_DEFAULT_DIR}")
-  endif()
-
-  # Download & build protobuf if missing
-  if(NOT EXISTS "${PROTOBUF_DIR}/installed/lib/libprotobuf.a")
-    message(STATUS "Protobuf not found, installing ...")
-    execute_process(COMMAND ${NNV_TOOLS_DIR}/download_protobuf.sh ${PROTOBUF_VERSION})
-  endif()
-
-  add_library(PROTOBUF_LIB SHARED IMPORTED)
-  set_target_properties(PROTOBUF_LIB PROPERTIES IMPORTED_LOCATION "${PROTOBUF_DIR}/installed/lib/libprotobuf.a")
-  target_include_directories(PROTOBUF_LIB INTERFACE "${PROTOBUF_DIR}/installed/include")
-
-  # ONNX
-  set(ONNX_VERSION 1.15.0)
-  set(ONNX_DIR "${NNV_TOOLS_DIR}/onnx-${ONNX_VERSION}")
-  if(NOT EXISTS "${ONNX_DIR}/onnx.proto3.pb.h")
-    message(STATUS "Generating ONNX protobuf file")
-    execute_process(COMMAND ${NNV_TOOLS_DIR}/download_onnx.sh ${ONNX_VERSION} ${PROTOBUF_VERSION})
-  endif()
-  file(GLOB DEPS_ONNX "${ONNX_DIR}/*.cc")
-  include_directories(SYSTEM "${ONNX_DIR}")
-endif()
-
 add_library(lala_parsing INTERFACE)
 target_include_directories(lala_parsing INTERFACE include ${LIBXML2_INCLUDE_DIR})
 target_link_libraries(lala_parsing INTERFACE lala_core ${XCSP3PARSER} cpp_peglib)
-
-if(WITH_NNV)
-  target_include_directories(lala_parsing INTERFACE ${PROTOBUF_DIR}/installed/include ${ONNX_DIR})
-  target_sources(lala_parsing INTERFACE ${DEPS_ONNX})
-  target_link_libraries(lala_parsing INTERFACE PROTOBUF_LIB)
-endif()
 
 target_compile_options(lala_parsing INTERFACE
   $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/Zc:__cplusplus /utf-8 /fp:strict>

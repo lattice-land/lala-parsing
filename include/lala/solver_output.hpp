@@ -12,7 +12,6 @@ namespace lala {
 enum class OutputType {
   XCSP,
   FLATZINC,
-  NNV,
   SMT2
 };
 
@@ -158,7 +157,7 @@ public:
   }
 
   template<class Env, class A, class S>
-  CUDA void print_solution_nnv(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
+  CUDA void print_solution_smt2(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     for(int i = 0; i < output_vars.size(); ++i) {
       printf("%s = ", output_vars[i].data());
       simplifier.print_interval(output_vars[i], env, sol);
@@ -174,11 +173,8 @@ public:
     else if (type == OutputType::XCSP) {
       print_solution_xml(env, sol, simplifier);
     }
-    else if (type == OutputType::NNV) {
-      print_solution_nnv(env, sol, simplifier);
-    }
     else if (type == OutputType::SMT2) {
-      print_solution_nnv(env, sol, simplifier);
+      print_solution_smt2(env, sol, simplifier);
     }
   }
 };

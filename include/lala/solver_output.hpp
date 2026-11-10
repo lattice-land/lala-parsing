@@ -104,10 +104,11 @@ public:
   }
 
   class SimplifierIdentity {
+    /** `b` is indexed by the first abstract variable of `vname` in `benv`; that is, `b` must be the abstract element in which the variables were first declared. */
     template <class Alloc, class B, class Env>
     CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
       const auto& x = *(benv.variable_of(vname));
-      x.sort.print_value(b.project(x.avars[0]));
+      x.sort.print_value(b.project(x.avars[0].vid()));
     }
 
     template <class Alloc, class B, class Env> 

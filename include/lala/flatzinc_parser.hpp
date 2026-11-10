@@ -395,6 +395,16 @@ public:
       return F::make_nary(sig, std::move(seq));
     }
 
+    F make_nary_fun_eq(Sig sig, const SV &sv) {
+      if(sv.size() < 3) {
+        return make_arity_error(sv, sig, 2, static_cast<int>(sv.size()) - 1);
+      }
+      auto left = f(sv[1]);
+      auto right = resolve_array(sv, sv[2]);
+      if(!right.is(F::Seq)) { return right; }
+      return F::make_binary(left, EQ, F::make_nary(sig, right.seq()));
+    }
+
     F make_float_in(const SV &sv) {
       return F::make_binary(
           F::make_binary(f(sv[1]), GEQ, f(sv[2])),
@@ -425,7 +435,11 @@ public:
       if (name == "int_tdiv") { return make_binary_fun_eq(TDIV, sv); }
       if (name == "int_cdiv") { return make_binary_fun_eq(CDIV, sv); }
       if (name == "int_fdiv") { return make_binary_fun_eq(FDIV, sv); }
-      if (name == "int_mod") { return make_binary_fun_eq(EMOD, sv); }
+      if (name == "int_mod") { return make_binary_fun_eq(TMOD, sv); }
+      if (name == "int_emod") { return make_binary_fun_eq(EMOD, sv); }
+      if (name == "int_tmod") { return make_binary_fun_eq(TMOD, sv); }
+      if (name == "int_cmod") { return make_binary_fun_eq(CMOD, sv); }
+      if (name == "int_fmod") { return make_binary_fun_eq(FMOD, sv); }
       if (name == "int_plus") { return make_binary_fun_eq(ADD, sv); }
       if (name == "int_minus") { return make_binary_fun_eq(SUB, sv); }
       if (name == "int_pow") { return make_binary_fun_eq(POW, sv); }
@@ -522,6 +536,14 @@ public:
         || name == "array_float_element" || name == "array_var_float_element")
       {
         return make_element_constraint(name, sv);
+      }
+      if (name == "array_int_minimum" || name == "array_float_minimum")
+      {
+        return make_nary_fun_eq(MIN, sv);
+      }
+      if (name == "array_int_maximum" || name == "array_float_maximum")
+      {
+        return make_nary_fun_eq(MAX, sv);
       }
       if (name == "int_lin_eq" || name == "bool_lin_eq" || name == "float_lin_eq" ||
               name == "int_lin_eq_reif" || name == "bool_lin_eq_reif" || name == "float_lin_eq_reif")

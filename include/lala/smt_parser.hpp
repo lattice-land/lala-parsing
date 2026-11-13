@@ -1,4 +1,4 @@
-// Copyright 2025 Yi-Nung Tsao
+// Copyright 2025 Yi-Nung Tsao, Ching-Yao Tang
 
 #ifndef LALA_PARSING_SMT_PARSER_HPP
 #define LALA_PARSING_SMT_PARSER_HPP
@@ -39,9 +39,10 @@ class SMTParser {
     F body;
   };
 
-  std::map<std::string, So> declared_symbols; // Symbol name -> sort.
-  std::map<std::string, DefinedFunction> defined_functions; // Function name -> signature and body.
-  std::map<std::string, So> active_function_parameters; // Parameters currently in scope while parsing a function body.
+  std::map<std::string, So> ignore_symbol_declaration;                // Symbol name -> sort.
+  std::map<std::string, DefinedFunction> ignore_function_declaration; // Function name -> signature and body.
+  std::map<std::string, So> ignore_active_func_params;                // Parameters currently in scope while parsing a function body.
+ 
   bool is_nnv;
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
@@ -100,8 +101,7 @@ class SMTParser {
     assert(static_cast<bool>(parser) == true);
 
     parser["Statements"] = [this](const SV& sv) { return make_statements(sv); };
-    // parser["Integer"] = [](const SV& sv) { return F::make_z(sv.token_to_number<logic_int>()); };
-    parser["Integer"] = [](const SV& sv) { return F::make_real(impl::string_to_real(sv.token_to_string())); };
+    parser["Integer"] = [](const SV& sv) { return F::make_z(sv.token_to_number<logic_int>()); };
     parser["Real"] = [](const SV& sv) { return F::make_real(impl::string_to_real(sv.token_to_string())); };
     parser["Boolean"] = [](const SV& sv) { return sv.token_to_string() == "true" ? F::make_true() : F::make_false(); };
     parser["SimpleSymbol"] = [](const SV& sv) { return sv.token_to_string(); };
@@ -122,7 +122,6 @@ class SMTParser {
     parser["FunApplication"] = [this](const SV& sv) { return make_fun_application(sv); };
     parser["Bound"] = [this](const SV& sv) { return make_bound(sv); };
     parser["Constraint"] = [this](const SV& sv) { return make_constraint(sv); };
-    // parser["Assertion"] = [this](const SV& sv) { return make_assertion(sv); };
 
     F smt_formulas;
     if (parser.parse(input.c_str(), smt_formulas) && !error) {
@@ -163,13 +162,10 @@ class SMTParser {
       return F::make_true();
     }
     else {
-      // Refer to make_parameter_decl(), make_existential(), and make_variable_decl() in flatzinc_parser.hpp
-      // for the implementation of variable declaration.
-
       // Expected semantic values: [Symbol, Sort].
       std::string name = std::any_cast<std::string>(sv[0]);
       // Check if the variable name is already used by a declared symbol or a defined function.
-      if (declared_symbols.contains(name) || defined_functions.contains(name)) {
+      if (ignore_symbol_declaration.contains(name) || ignore_function_declaration.contains(name)) {
         return make_error(sv, "Symbol `" + name + "` already declared.");
       }
 
@@ -177,7 +173,7 @@ class SMTParser {
       // Get the corresponding sort type object
       So var_sort = get_sort_type(sort_name);
       
-      declared_symbols.emplace(name, var_sort);
+      ignore_symbol_declaration.emplace(name, var_sort);
       output.add_var(name);
       return F::make_exists(UNTYPED, LVar<allocator_type>(name), std::move(var_sort));
     }
@@ -187,47 +183,44 @@ class SMTParser {
     // Expected semantic values: [Symbol, Sort, Symbol, Sort, ...].
     // Each adjacent pair describes one function parameter from the SMT sorted-var list.
     std::vector<std::pair<std::string, So>> params;
-    active_function_parameters.clear();
+    ignore_active_func_params.clear();
 
     for (size_t i = 0; i < sv.size(); i += 2) {
       auto var_name = std::any_cast<std::string>(sv[i]);
       auto sort_name = std::any_cast<std::string>(sv[i + 1]);
 
-      if (active_function_parameters.contains(var_name)) {
+      if (ignore_active_func_params.contains(var_name)) {
         // SMT-LIB does not explicitly require define-fun parameters to be distinct.
-        // This parser rejects duplicates because its substitution map is keyed by
-        // parameter name and cannot represent shadowed parameters correctly.
+        // This parser rejects duplicates because its substitution map is keyed by parameter name and cannot represent shadowed parameters correctly.
         make_error(sv, "Duplicate function parameter `" + var_name + "`.");
         return {};
       }
 
       So var_sort = get_sort_type(sort_name);
-      active_function_parameters.emplace(var_name, var_sort);
+      ignore_active_func_params.emplace(var_name, var_sort);
       params.emplace_back(std::move(var_name), std::move(var_sort));
     }
     return params;
   }
 
   F make_define_fun(const SV& sv) {
-    // Expected semantic values:
-    // [Symbol(function name), SortedVarList(params), Sort(return sort), Term(body)].
-    // The grammar has already parsed the parameter list before the body, so
-    // active_function_parameters was available while the body was being built.
+    // Expected semantic values: [Symbol(function name), SortedVarList(params), Sort(return sort), Term(body)].
+    // The grammar has already parsed the parameter list before the body, so ignore_active_func_params was available while the body was being built.
     auto fun_name = std::any_cast<std::string>(sv[0]);
     auto params = std::any_cast<std::vector<std::pair<std::string, So>>>(sv[1]);
     auto return_sort = get_sort_type(std::any_cast<std::string>(sv[2]));
     F body = f(sv[3]);
 
     // The parameter scope is only needed while parsing the body.
-    active_function_parameters.clear();
+    ignore_active_func_params.clear();
 
-    if (declared_symbols.contains(fun_name) || defined_functions.contains(fun_name)) {
+    if (ignore_symbol_declaration.contains(fun_name) || ignore_function_declaration.contains(fun_name)) {
       return make_error(sv, "Symbol `" + fun_name + "` already declared.");
     }
 
     // A define-fun command does not add an assertion directly in this parser.
     // It is stored as a named macro-like definition and expand applications in make_apply_fun().
-    defined_functions.emplace(fun_name, DefinedFunction{
+    ignore_function_declaration.emplace(fun_name, DefinedFunction{
       std::move(params),
       std::move(return_sort),
       std::move(body)
@@ -239,17 +232,17 @@ class SMTParser {
     auto name = std::any_cast<std::string>(sv[0]);
 
     // Function parameters are scoped only while parsing the function body.
-    if (active_function_parameters.contains(name)) {
+    if (ignore_active_func_params.contains(name)) {
       return F::make_lvar(UNTYPED, LVar<allocator_type>(name.data()));
     }
 
-    auto fun_it = defined_functions.find(name);
+    auto fun_it = ignore_function_declaration.find(name);
     // A bare symbol that is not a defined function is treated as a logical variable.
-    if (fun_it == defined_functions.end()) {
+    if (fun_it == ignore_function_declaration.end()) {
       return F::make_lvar(UNTYPED, LVar<allocator_type>(name.data()));
     }
-    // Identifier only handles bare symbols. A defined function with parameters
-    // must be parsed through FunApplication, where its arguments are available.
+    // Identifier only handles bare symbols. 
+    // A defined function with parameters must be parsed through FunApplication, where its arguments are available.
     if (!fun_it->second.params.empty()) {
       return make_error(sv, "Function `" + name + "` expects arguments.");
     }
@@ -261,8 +254,7 @@ class SMTParser {
     if (bindings.empty()) {
       return body;
     }
-    // Modify body in-place: body is owned by this function (taken by value),
-    // inplace_map visits only leaf nodes and replaces them directly
+    // Modify body in-place: body is owned by this function (taken by value), inplace_map visits only leaf nodes and replaces them directly
     body.inplace_map(
       [&bindings](F& leaf, const F&) {
         if (leaf.is(F::LV)) {
@@ -279,8 +271,8 @@ class SMTParser {
   F make_fun_application(const SV& sv) {
     // Expected semantic values: [Symbol(function name), Term(arg1), Term(arg2), ...].
     auto callee = std::any_cast<std::string>(sv[0]);
-    auto fun_it = defined_functions.find(callee);
-    if (fun_it == defined_functions.end()) {
+    auto fun_it = ignore_function_declaration.find(callee);
+    if (fun_it == ignore_function_declaration.end()) {
       return make_error(sv, "Undefined function `" + callee + "`.");
     }
 
@@ -303,8 +295,7 @@ class SMTParser {
   }
 
   F make_let(const SV& sv) {
-    // Expected semantic values:
-    // [Symbol, Term, Symbol, Term, ..., Term(body)].
+    // Expected semantic values: [Symbol, Term, Symbol, Term, ..., Term(body)].
     // One binding is (Symbol, Term pair).
     // Therefore, `sv` size must be odd and at least size 3 (one binding + one body).
     if (sv.size() < 3 || (sv.size() % 2) == 0) {
@@ -370,6 +361,10 @@ class SMTParser {
 
     Sig sig;
     if (arith_operator == "+") {
+      // for unary add
+      if (sv.size() == 2) {
+        return f(sv[1]);
+      }
       sig = ADD;
     }
     else if (arith_operator == "-") {
@@ -429,18 +424,13 @@ class SMTParser {
     else if (logic_operator == "or") sig = OR;
     else if (logic_operator == "xor") sig = XOR;
     else if (logic_operator == "=>") {
-      // Implication is right-associative and SMT allows n-ary syntax for right-associative op
-      // (=> a b c) == (=> a (=> b c))
+      // Implication is right-associative and SMT allows n-ary syntax for right-associative op (=> a b c) == (=> a (=> b c))
       F implication = f(sv[sv.size() - 1]);
       for (size_t i = sv.size() - 2; i >= 1; --i) {
         implication = F::make_binary(f(sv[i]), IMPLY, std::move(implication));
       }
       return implication;
     }
-
-    // if (sv.size() < 3) {
-    //   return make_error(sv, "`" + logic_operator + "` expects at least two operands.");
-    // }
 
     FSeq seq;
     for (size_t i = 1; i < sv.size(); ++i) {
@@ -465,51 +455,14 @@ class SMTParser {
       return F::make_nary(AND, std::move(children));
     }
   }
-
-  // Since ( assert ⟨term⟩ ) is the only way to add assertions in SMT-lib, the else branch will never be used.
-  // we can directly return the assertion formula without checking the size of `sv`.
-  // F make_assertion(const SV& sv) {
-  //   if (sv.size() == 1) {
-  //     return f(sv[0]);
-  //   }
-  //   else {
-  //     FSeq disjuncts;
-  //     auto logic_operator = std::any_cast<std::string>(sv[0]); // OR
-  //     for (int i = 1; i < sv.size(); ++i) {
-  //       disjuncts.push_back(f(sv[i]));
-  //     }
-
-  //     return F::make_nary(OR, std::move(disjuncts));
-  //   }
-  // }
 };
 }  // namespace impl
 
-// template <class Allocator>
-// TFormula<Allocator> parse_smt_str(const std::string& input) {
-//   impl::SMTParser<Allocator> parser;
-//   return parser.parse(input);
-// }
-
 template <class Allocator>
-TFormula<Allocator> parse_smt_str(const std::string& input, SolverOutput<Allocator>& output, bool is_nnv) {
+TFormula<Allocator> parse_smt_str(const std::string& input, SolverOutput<Allocator>& output, bool is_nnv = false) {
   impl::SMTParser<Allocator> parser(output, is_nnv);
   return parser.parse(input);
 }
-
-// template <class Allocator>
-// TFormula<Allocator> parse_smt(const std::string& filename) {
-//   std::ifstream t(filename);
-//   if (t.is_open()) {
-//     std::string input((std::istreambuf_iterator<char>(t)),
-//                       std::istreambuf_iterator<char>());
-//     return parse_smt_str<Allocator>(input);
-//   }
-//   else {
-//     std::cerr << "File `" << filename << "` does not exists." << std::endl;
-//   }
-//   return TFormula<Allocator>::make_false();
-// }
 
 template <class Allocator>
 TFormula<Allocator> parse_smt(const std::string& filename, SolverOutput<Allocator>& output, bool is_nnv) {

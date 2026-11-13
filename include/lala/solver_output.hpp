@@ -11,7 +11,8 @@ namespace lala {
 
 enum class OutputType {
   XCSP,
-  FLATZINC
+  FLATZINC,
+  SMT
 };
 
 template<class Allocator>
@@ -97,12 +98,22 @@ public:
     output_vars.push_back(var_name);
   }
 
+  void set_type(const OutputType& output_type) {
+    type = output_type;
+  }
+
   class SimplifierIdentity {
     /** `b` is indexed by the first abstract variable of `vname` in `benv`; that is, `b` must be the abstract element in which the variables were first declared. */
     template <class Alloc, class B, class Env>
     CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
       const auto& x = *(benv.variable_of(vname));
       x.sort.print_value(b.project(x.avars[0].vid()));
+    }
+
+    template <class Alloc, class B, class Env> 
+    CUDA void print_interval(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
+      const auto& x = *(benv.variable_of(vname));
+      x.sort.print_interval(b.project(x.avars[0].vid()));
     }
   };
 
@@ -144,13 +155,25 @@ public:
     printf("</values> </instantiation>\n");
   }
 
+  template<class Env, class A, class S>
+  CUDA void print_solution_smt(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
+    for(int i = 0; i < output_vars.size(); ++i) {
+      printf("%s = ", output_vars[i].data());
+      simplifier.print_interval(output_vars[i], env, sol);
+      printf(";\n");
+    }
+  }
+
   template <class Env, class A, class S>
   CUDA void print_solution(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     if(type == OutputType::FLATZINC) {
       print_solution_flatzinc(env, sol, simplifier);
     }
-    else {
+    else if (type == OutputType::XCSP) {
       print_solution_xml(env, sol, simplifier);
+    }
+    else if (type == OutputType::SMT) {
+      print_solution_smt(env, sol, simplifier);
     }
   }
 };

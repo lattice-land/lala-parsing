@@ -1,4 +1,4 @@
-// Copyright 2026 Pierre Talbot
+// Copyright 2026 Wei Huang
 
 #ifndef LALA_PARSING_TCN_WRITER_HPP
 #define LALA_PARSING_TCN_WRITER_HPP
@@ -9,23 +9,15 @@
 
 namespace lala {
 
-/** Map a Sig used by the AST to its canonical TCN operator symbol.
- *  Division variants (TDIV/FDIV/CDIV/EDIV) all serialize to "D";
- *  modulo variants (TMOD/FMOD/CMOD/EMOD/MOD) all serialize to "M".
+/** Map a Sig to its TCN operator symbol.
+ *  Divisions and moduli use their lala names (tdiv, fdiv, cdiv, ediv, tmod, fmod, cmod, emod).
  */
 inline const char* tcn_sig_to_symbol(Sig op) {
   switch(op) {
     case ADD: return "+";
     case MUL: return "*";
-    case TDIV:
-    case FDIV:
-    case CDIV:
-    case EDIV: return "D";
-    case MOD:
-    case TMOD:
-    case FMOD:
-    case CMOD:
-    case EMOD: return "M";
+    case TDIV: case FDIV: case CDIV: case EDIV:
+    case TMOD: case FMOD: case CMOD: case EMOD: return string_of_sig(op);
     case MAX: return "A";
     case MIN: return "I";
     case LEQ: return "L";
@@ -38,7 +30,7 @@ inline const char* tcn_sig_to_symbol(Sig op) {
 
 /** Format the lower bound of a domain in the TCN text format.
  *  An open lower bound (top of the bound lattice) is rendered as "-inf";
- *  an empty lower bound (bot) is rendered as "+inf".
+ *  an empty lower bound (bot) is rendered as "inf".
  */
 template <class Bound>
 inline std::string tcn_lower_bound_to_string(const Bound& bound) {
@@ -46,7 +38,7 @@ inline std::string tcn_lower_bound_to_string(const Bound& bound) {
     return "-inf";
   }
   if(bound.is_bot()) {
-    return "+inf";
+    return "inf";
   }
   return std::to_string(bound.value());
 }
@@ -70,7 +62,7 @@ inline std::string tcn_upper_bound_to_string(const Bound& bound) {
  *  to the TCN text format.
  *
  *  Layout:
- *    [ "minimize x<vid>\n" | "maximize x<vid>\n" ]   # optional objective line
+ *    [ "minimize <vid>\n" | "maximize <vid>\n" ]     # optional objective line
  *    <num_vars>\n
  *    <lb> <ub>\n                                     # one line per variable
  *    ...
@@ -85,10 +77,10 @@ inline std::string tcn_upper_bound_to_string(const Bound& bound) {
 template <class Store, class IProp, class BAB>
 void write_preprocessed_tcn(std::ostream& out, const Store& store, const IProp& iprop, const BAB& bab) {
   if(bab.is_minimization()) {
-    out << "minimize x" << bab.objective_var().vid() << '\n';
+    out << "minimize " << bab.objective_var().vid() << '\n';
   }
   else if(bab.is_maximization()) {
-    out << "maximize x" << bab.objective_var().vid() << '\n';
+    out << "maximize " << bab.objective_var().vid() << '\n';
   }
   out << store.vars() << '\n';
   for(int i = 0; i < store.vars(); ++i) {

@@ -1,4 +1,4 @@
-// Copyright 2025 Pierre Talbot
+// Copyright 2026 Wei Huang
 
 #ifndef LALA_PARSING_TCN_PARSER_HPP
 #define LALA_PARSING_TCN_PARSER_HPP
@@ -14,16 +14,15 @@ namespace lala {
 
 namespace impl {
 
-/** Map a TCN operator symbol back to the canonical Sig used when constructing the AST.
- *  Division variants (TDIV/FDIV/CDIV/EDIV) are all dumped as "D"; we restore to TDIV
- *  (truncated division, matching FlatZinc `int_div`).  Modulo variants similarly restore
- *  to TMOD.
+/** Map a TCN operator symbol to its Sig.
+ *  Divisions and moduli use their lala names (tdiv, fdiv, cdiv, ediv, tmod, fmod, cmod, emod).
  */
 inline Sig tcn_symbol_to_sig(const std::string& sym) {
   if(sym == "+") return ADD;
   if(sym == "*") return MUL;
-  if(sym == "D") return TDIV;
-  if(sym == "M") return TMOD;
+  for(Sig sig : {TDIV, FDIV, CDIV, EDIV, TMOD, FMOD, CMOD, EMOD}) {
+    if(sym == string_of_sig(sig)) return sig;
+  }
   if(sym == "A") return MAX;
   if(sym == "I") return MIN;
   if(sym == "L") return LEQ;
@@ -37,7 +36,7 @@ inline Sig tcn_symbol_to_sig(const std::string& sym) {
 /** Parse a Ternary Constraint Network (.tcn) file into a TFormula.
  *
  *  Format (see doc/tcn_parsing.md):
- *    [minimize xK | maximize xK]   <- optional objective line
+ *    [minimize K | maximize K]   <- optional objective line (K is a variable index)
  *    N
  *    lb_0 ub_0
  *    ...
@@ -46,7 +45,7 @@ inline Sig tcn_symbol_to_sig(const std::string& sym) {
  *    x_0 y_0 op_0 z_0
  *    ...
  *
- *  Variables are named x0, x1, ..., x{N-1}.
+ *  Variables are identified by their index in the file, and named x0, x1, ..., x{N-1} in the formula.
  *  Bounds: finite integer, "-inf" (no lower bound), or "inf" (no upper bound).
  *  Each constraint encodes: x_x = x_y op x_z.
  */
@@ -76,26 +75,13 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
     return nullptr;
   }
 
-  // Save objective to add at the END (after all variable declarations),
-  // so the objective variable is guaranteed to exist when BAB interprets it.
-  F objective_formula = F::make_true();
-  bool has_objective = false;
-
-  if(first == "minimize" || first == "maximize") {
-    Sig obj_sig = (first == "minimize") ? MINIMIZE : MAXIMIZE;
-    std::string obj_var_str;
-    if(!(in >> obj_var_str)) {
-      std::cerr << "TCN parser: expected variable after '" << first << "'" << std::endl;
-      return nullptr;
-    }
-    objective_formula = F::make_unary(obj_sig,
-      F::make_lvar(UNTYPED, LVar<Allocator>(obj_var_str.data())));
-    has_objective = true;
-    // Read the next token as the variable count.
-    if(!(in >> first)) {
-      std::cerr << "TCN parser: failed to read number of variables" << std::endl;
-      return nullptr;
-    }
+  const bool has_objective = first == "minimize" || first == "maximize";
+  const Sig obj_sig = first == "minimize" ? MINIMIZE : MAXIMIZE;
+  int obj_var = 0;
+  // The objective is followed by the variable count.
+  if(has_objective && !(in >> obj_var >> first)) {
+    std::cerr << "TCN parser: expected a variable index after the objective" << std::endl;
+    return nullptr;
   }
 
   int n = 0;
@@ -106,6 +92,10 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
   }
   if(n < 0) {
     std::cerr << "TCN parser: negative number of variables" << std::endl;
+    return nullptr;
+  }
+  if(has_objective && (obj_var < 0 || obj_var >= n)) {
+    std::cerr << "TCN parser: objective variable index out of range" << std::endl;
     return nullptr;
   }
 
@@ -138,8 +128,8 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
         F::make_z(lb)));
     }
 
-    // Upper bound constraint (skip when "inf" or "+inf")
-    if(ub_str != "inf" && ub_str != "+inf") {
+    // Upper bound constraint (skip when "inf")
+    if(ub_str != "inf") {
       logic_int ub;
       try { ub = std::stoll(ub_str); }
       catch(...) {
@@ -185,7 +175,8 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
 
   // Objective goes last so all variables are declared before BAB interprets it.
   if(has_objective) {
-    conjuncts.push_back(std::move(objective_formula));
+    conjuncts.push_back(F::make_unary(obj_sig,
+      F::make_lvar(UNTYPED, LVar<Allocator>(var_name(obj_var).data()))));
   }
 
   F formula = F::make_nary(AND, std::move(conjuncts));

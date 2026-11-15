@@ -95,6 +95,18 @@ void write_preprocessed_tcn(std::ostream& out, const Store& store, const IProp& 
   }
 }
 
+/** Append a search strategy to a TCN file: `search <var_order> <val_order> <k> <v_1> ... <v_k>`.
+ *  Must be called after `write_preprocessed_tcn`, once per strategy, in the order they are applied.
+ */
+template <class Vars>
+void write_tcn_search(std::ostream& out, const char* var_order, const char* val_order, const Vars& vars) {
+  out << "search " << var_order << ' ' << val_order << ' ' << vars.size();
+  for(int i = 0; i < vars.size(); ++i) {
+    out << ' ' << vars[i].vid();
+  }
+  out << '\n';
+}
+
 }
 
 #endif

@@ -44,6 +44,7 @@ inline Sig tcn_symbol_to_sig(const std::string& sym) {
  *    M
  *    x_0 y_0 op_0 z_0
  *    ...
+ *    [search var_order val_order K v_1 ... v_K]*   <- optional search strategies
  *
  *  Variables are identified by their index in the file, and named x0, x1, ..., x{N-1} in the formula.
  *  Bounds: finite integer, "-inf" (no lower bound), or "inf" (no upper bound).
@@ -170,6 +171,29 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
         F::make_lvar(UNTYPED, LVar<Allocator>(var_name(y).data())),
         op,
         F::make_lvar(UNTYPED, LVar<Allocator>(var_name(z).data())))));
+  }
+
+  // Optional search strategies, same encoding as the FlatZinc parser: search(var_order, indomain_<val_order>, vars...).
+  std::string keyword;
+  while(in >> keyword) {
+    std::string var_order, val_order;
+    int k;
+    if(keyword != "search" || !(in >> var_order >> val_order >> k) || k < 0) {
+      std::cerr << "TCN parser: expected 'search <var_order> <val_order> <k> <vars>...', got '" << keyword << "'" << std::endl;
+      return nullptr;
+    }
+    FSeq search{Allocator{}};
+    search.push_back(F::make_nary(battery::string<Allocator>(var_order.data()), FSeq{Allocator{}}));
+    search.push_back(F::make_nary(battery::string<Allocator>(("indomain_" + val_order).data()), FSeq{Allocator{}}));
+    for(int i = 0; i < k; ++i) {
+      int v;
+      if(!(in >> v) || v < 0 || v >= n) {
+        std::cerr << "TCN parser: invalid variable index in search strategy" << std::endl;
+        return nullptr;
+      }
+      search.push_back(F::make_lvar(UNTYPED, LVar<Allocator>(var_name(v).data())));
+    }
+    conjuncts.push_back(F::make_nary(battery::string<Allocator>("search"), std::move(search)));
   }
 
   // Objective goes last so all variables are declared before BAB interprets it.

@@ -98,10 +98,6 @@ public:
     output_vars.push_back(var_name);
   }
 
-  void set_type(const OutputType& output_type) {
-    type = output_type;
-  }
-
   class SimplifierIdentity {
     /** `b` is indexed by the first abstract variable of `vname` in `benv`; that is, `b` must be the abstract element in which the variables were first declared. */
     template <class Alloc, class B, class Env>

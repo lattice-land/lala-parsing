@@ -40,7 +40,7 @@ inline std::string tcn_lower_bound_to_string(const Bound& bound) {
   if(bound.is_bot()) {
     return "inf";
   }
-  return std::to_string(bound.value());
+  return std::to_string(bound.load());
 }
 
 /** Format the upper bound of a domain in the TCN text format.
@@ -55,7 +55,7 @@ inline std::string tcn_upper_bound_to_string(const Bound& bound) {
   if(bound.is_bot()) {
     return "-inf";
   }
-  return std::to_string(bound.value());
+  return std::to_string(bound.load());
 }
 
 /** Serialize an abstract state (variable domains + ternary propagators)

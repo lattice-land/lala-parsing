@@ -91,10 +91,10 @@ void write_preprocessed_tcn(std::ostream& out, const Store& store, const IProp& 
   out << iprop.num_deductions() << '\n';
   for(int i = 0; i < iprop.num_deductions(); ++i) {
     auto bytecode = iprop.load_deduce(i);
-    out << bytecode.x.vid() << ' '
-        << bytecode.y.vid() << ' '
+    out << bytecode.x << ' '
+        << bytecode.y << ' '
         << tcn_sig_to_symbol(bytecode.op) << ' '
-        << bytecode.z.vid() << '\n';
+        << bytecode.z << '\n';
   }
 }
 

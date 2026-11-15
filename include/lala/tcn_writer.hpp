@@ -62,7 +62,7 @@ inline std::string tcn_upper_bound_to_string(const Bound& bound) {
  *  to the TCN text format.
  *
  *  Layout:
- *    [ "minimize <vid>\n" | "maximize <vid>\n" ]     # optional objective line
+ *    [ "minimize <obj>\n" ]                          # optional objective line
  *    <num_vars>\n
  *    <lb> <ub>\n                                     # one line per variable
  *    ...
@@ -70,17 +70,14 @@ inline std::string tcn_upper_bound_to_string(const Bound& bound) {
  *    <x> <y> <op> <z>\n                              # one line per ternary bytecode
  *    ...
  *
- *  Store, IProp and BAB are duck-typed: only the methods used below
- *  (vars(), num_deductions(), load_deduce(i), is_minimization(),
- *  is_maximization(), objective_var()) need to be available.
+ *  `obj` is the index of the variable to minimize, or -1 for a satisfaction problem.
+ *  Store and IProp are duck-typed: only the methods used below
+ *  (vars(), num_deductions(), load_deduce(i)) need to be available.
  */
-template <class Store, class IProp, class BAB>
-void write_preprocessed_tcn(std::ostream& out, const Store& store, const IProp& iprop, const BAB& bab) {
-  if(bab.is_minimization()) {
-    out << "minimize " << bab.objective_var().vid() << '\n';
-  }
-  else if(bab.is_maximization()) {
-    out << "maximize " << bab.objective_var().vid() << '\n';
+template <class Store, class IProp>
+void write_preprocessed_tcn(std::ostream& out, const Store& store, const IProp& iprop, int obj = -1) {
+  if(obj >= 0) {
+    out << "minimize " << obj << '\n';
   }
   out << store.vars() << '\n';
   for(int i = 0; i < store.vars(); ++i) {

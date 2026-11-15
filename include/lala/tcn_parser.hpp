@@ -36,7 +36,7 @@ inline Sig tcn_symbol_to_sig(const std::string& sym) {
 /** Parse a Ternary Constraint Network (.tcn) file into a TFormula.
  *
  *  Format (see doc/tcn_parsing.md):
- *    [minimize K | maximize K]   <- optional objective line (K is a variable index)
+ *    [minimize K]   <- optional objective line (K is a variable index)
  *    N
  *    lb_0 ub_0
  *    ...
@@ -75,8 +75,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
     return nullptr;
   }
 
-  const bool has_objective = first == "minimize" || first == "maximize";
-  const Sig obj_sig = first == "minimize" ? MINIMIZE : MAXIMIZE;
+  const bool has_objective = first == "minimize";
   int obj_var = 0;
   // The objective is followed by the variable count.
   if(has_objective && !(in >> obj_var >> first)) {
@@ -175,7 +174,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
 
   // Objective goes last so all variables are declared before BAB interprets it.
   if(has_objective) {
-    conjuncts.push_back(F::make_unary(obj_sig,
+    conjuncts.push_back(F::make_unary(MINIMIZE,
       F::make_lvar(UNTYPED, LVar<Allocator>(var_name(obj_var).data()))));
   }
 

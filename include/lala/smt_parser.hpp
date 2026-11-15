@@ -43,14 +43,14 @@ class SMTParser {
   std::map<std::string, DefinedFunction> ignore_function_declaration; // Function name -> signature and body.
   std::map<std::string, So> ignore_active_func_params;                // Parameters currently in scope while parsing a function body.
  
-  bool is_nnv;
+  bool ignore_variable_declaration;
   bool error;   // If an error was found during parsing.
   bool silent;  // If we do not want to output error messages.
 
   SolverOutput<Allocator>& output;
 
  public:
-  SMTParser(SolverOutput<Allocator>& output, bool is_nnv) : error(false), silent(false), output(output), is_nnv(is_nnv) {}
+  SMTParser(SolverOutput<Allocator>& output, bool ignore_variable_declaration) : error(false), silent(false), output(output), ignore_variable_declaration(ignore_variable_declaration) {}
 
   F parse(const std::string& input) {
       peg::parser parser(R"(
@@ -158,7 +158,7 @@ class SMTParser {
   }
 
   F make_variable_decl(const SV& sv) {
-    if(is_nnv) {
+    if(ignore_variable_declaration) {
       return F::make_true();
     }
     else {
@@ -459,18 +459,18 @@ class SMTParser {
 }  // namespace impl
 
 template <class Allocator>
-TFormula<Allocator> parse_smt_str(const std::string& input, SolverOutput<Allocator>& output, bool is_nnv = false) {
-  impl::SMTParser<Allocator> parser(output, is_nnv);
+TFormula<Allocator> parse_smt_str(const std::string& input, SolverOutput<Allocator>& output, bool ignore_variable_declaration = false) {
+  impl::SMTParser<Allocator> parser(output, ignore_variable_declaration);
   return parser.parse(input);
 }
 
 template <class Allocator>
-TFormula<Allocator> parse_smt(const std::string& filename, SolverOutput<Allocator>& output, bool is_nnv) {
+TFormula<Allocator> parse_smt(const std::string& filename, SolverOutput<Allocator>& output, bool ignore_variable_declaration) {
   std::ifstream t(filename);
   if (t.is_open()) {
     std::string input((std::istreambuf_iterator<char>(t)),
                       std::istreambuf_iterator<char>());
-    return parse_smt_str<Allocator>(input, output, is_nnv);
+    return parse_smt_str<Allocator>(input, output, ignore_variable_declaration);
   }
   else {
     std::cerr << "File `" << filename << "` does not exists." << std::endl;

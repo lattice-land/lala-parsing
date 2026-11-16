@@ -5,3 +5,4 @@ Supported formats:
 
 * [XCSP3](http://xcsp.org/)
 * [MiniZinc/FlatZinc](https://www.minizinc.org/)
+* [TCN](doc/tcn_parsing.md) (ternary constraint network)

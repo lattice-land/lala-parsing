@@ -16,6 +16,7 @@
 #include <cinttypes>
 #include "battery/shared_ptr.hpp"
 #include "lala/logic/ast.hpp"
+#include "lala/logic/algorithm.hpp"
 #include "solver_output.hpp"
 
 namespace lala {
@@ -344,37 +345,6 @@ public:
         }
       }
       return std::move(formula);
-    }
-
-    /** The equality predicate suited to a sort: `EQUIV` for Booleans, `ZEQ` for integers, `REQ` for real numbers and the polymorphic `EQ` otherwise (sets). */
-    static Sig eq_of_sort(const Sort<allocator_type>& sort) {
-      if(sort.is_bool()) { return EQUIV; }
-      else if(sort.is_int()) { return ZEQ; }
-      else if(sort.is_real()) { return REQ; }
-      else { return EQ; }
-    }
-
-    /** The equality predicate suited to the result of the function symbol `sig`. */
-    static Sig eq_of_result(Sig sig) {
-      auto sort = result_sort_of<allocator_type>(sig);
-      return sort.has_value() ? eq_of_sort(*sort) : EQ;
-    }
-
-    /** The equality predicate suited to the constant `c`. */
-    static Sig eq_of_value(const F& c) {
-      auto sort = c.sort();
-      return sort.has_value() ? eq_of_sort(*sort) : EQ;
-    }
-
-    /** The equality predicate suited to the variable declared in `decl` (an existential, possibly in a conjunction). */
-    static Sig eq_of_decl(const F& decl) {
-      if(decl.is(F::E)) {
-        return eq_of_sort(battery::get<1>(decl.exists()));
-      }
-      else if(decl.is(F::Seq) && decl.sig() == AND && decl.seq().size() > 0) {
-        return eq_of_decl(decl.seq(0));
-      }
-      return EQ;
     }
 
     F make_binary(Sig sig, const SV &sv) {

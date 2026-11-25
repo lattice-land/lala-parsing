@@ -14,14 +14,14 @@ namespace lala {
  */
 inline const char* tcn_sig_to_symbol(Sig op) {
   switch(op) {
-    case ADD: return "+";
-    case MUL: return "*";
-    case TDIV: case FDIV: case CDIV: case EDIV:
-    case TMOD: case FMOD: case CMOD: case EMOD: return string_of_sig(op);
-    case MAX: return "A";
-    case MIN: return "I";
-    case LEQ: return "L";
-    case EQ:  return "=";
+    case ZADD: return "+";
+    case ZMUL: return "*";
+    case ZTDIV: case ZFDIV: case ZCDIV: case ZEDIV:
+    case ZTMOD: case ZFMOD: case ZCMOD: case ZEMOD: return string_of_sig(op);
+    case ZMAX: return "A";
+    case ZMIN: return "I";
+    case ZLEQ: return "L";
+    case ZEQ: return "=";
     default:
       std::cerr << "Unsupported operator in TCN dump: " << string_of_sig_txt(op) << std::endl;
       exit(EXIT_FAILURE);

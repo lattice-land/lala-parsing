@@ -212,6 +212,7 @@ namespace XCSP3Core {
       F to_lala_logical_variable(const string &variable);
       lala::LVar<Allocator> buildAuxVariableInteger(size_t maxValue);
       lala::LVar<Allocator> buildAuxVariableInteger();
+      lala::LVar<Allocator> buildAuxVariableBoolean();
 
       public:
         size_t num_variables() const {
@@ -406,8 +407,8 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, int minVa
   lala::LVar<Allocator> lvar(id.c_str());
   output.add_var(id.c_str());
   variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
-  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::LEQ, F::make_z(maxValue)));
-  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::GEQ, F::make_z(minValue)));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::ZLEQ, F::make_z(maxValue)));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::ZGEQ, F::make_z(minValue)));
 }
 
 template<class Allocator>
@@ -449,7 +450,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, XVari
     cout << endl;
   }
   typename F::Sequence seq;
-  lala::Sig sig = support ? lala::EQ : lala::NEQ;
+  lala::Sig sig = support ? lala::ZEQ : lala::ZNEQ;
   for(int i = 0; i < tuples.size(); ++i) {
     if(tuples[i] == INT_MAX && hasStar) {
       return; // constraint satisfied by the presence of a star.
@@ -477,7 +478,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     displayList(list);
   }
   extensionAs[id] = tuples;
-  lala::Sig sig = support ? lala::EQ : lala::NEQ;
+  lala::Sig sig = support ? lala::ZEQ : lala::ZNEQ;
   if (table_decomposition == lala::TableDecomposition::ELEMENTS && support) {
     size_t numVars = tuples[0].size();
     auto auxVar = F::make_lvar(UNTYPED, buildAuxVariableInteger(tuples.size() -1));
@@ -486,9 +487,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
         // index = j ==> varName = value
         if (!hasStar || tuples[j][i] != INT_MAX) {
           constraints.push_back(F::make_binary(
-            F::make_binary(auxVar, lala::EQ, F::make_z(j)),
+            F::make_binary(auxVar, lala::ZEQ, F::make_z(j)),
             lala::IMPLY,
-            F::make_binary(to_lala_logical_variable(list[i]), lala::EQ, F::make_z(tuples[j][i]))));
+            F::make_binary(to_lala_logical_variable(list[i]), lala::ZEQ, F::make_z(tuples[j][i]))));
         }
       }
     }
@@ -566,24 +567,25 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
   switch(node->type) {
     case OUNDEF:
       throw std::runtime_error("found an undefined symbol (`OUNDEF`) which seems to indicate a bug in the XCSP3 model.");
-    case ONEG: sig = NEG; break;
-    case OABS: sig = ABS; break;
-    case OSQR: sig = POW; break;
-    case OADD: sig = ADD; break;
-    case OSUB: sig = SUB; break;
-    case OMUL: sig = MUL; break;
-    case ODIV: sig = DIV; break;
-    case OMOD: sig = MOD; break;
-    case OPOW: sig = POW; break;
+    case ONEG: sig = ZNEG; break;
+    case OABS: sig = ZABS; break;
+    case OSQR: sig = ZPOW; break;
+    case OADD: sig = ZADD; break;
+    case OSUB: sig = ZSUB; break;
+    case OMUL: sig = ZMUL; break;
+    // XCSP3 follows the semantics of C++ (`/` and `%`), i.e., truncated division.
+    case ODIV: sig = ZTDIV; break;
+    case OMOD: sig = ZTMOD; break;
+    case OPOW: sig = ZPOW; break;
     case ODIST: throw std::runtime_error("unsupported DIST"); // return make_dist(node);
-    case OMIN: sig = MIN; break;
-    case OMAX: sig = MAX; break;
-    case OLT: sig = lala::LT; break;
-    case OLE: sig = LEQ; break;
-    case OGE: sig = GEQ; break;
-    case OGT: sig = lala::GT; break;
-    case ONE: sig = NEQ; break;
-    case OEQ: sig = lala::EQ; break;
+    case OMIN: sig = ZMIN; break;
+    case OMAX: sig = ZMAX; break;
+    case OLT: sig = lala::ZLT; break;
+    case OLE: sig = ZLEQ; break;
+    case OGE: sig = ZGEQ; break;
+    case OGT: sig = lala::ZGT; break;
+    case ONE: sig = ZNEQ; break;
+    case OEQ: sig = lala::ZEQ; break;
     case OSET: throw std::runtime_error("unsupported set"); // return make_set(node);
     case OIN: sig = lala::IN; break;
     case ONOTIN: throw std::runtime_error("unsupported notin");  // return make_notin(node);
@@ -638,6 +640,26 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
   if(node->type == OSQR) {
     seq.push_back(F::make_z(2)); // we represent `x SQR` by `x POW 2`.
   }
+  /** XCSP3 freely mixes Booleans and integers (variables are integers); we insert the conversions `BOOL2INT` and `INT2BOOL` where needed. */
+  auto is_bool = [](const F& g) { auto sort = g.sort(); return sort.has_value() && sort->is_bool(); };
+  auto to_int = [&](F& g) { if(is_bool(g)) { g = F::make_unary(BOOL2INT, std::move(g)); } };
+  auto to_bool = [&](F& g) { if(!is_bool(g)) { g = F::make_unary(INT2BOOL, std::move(g)); } };
+  if(is_z_arith(sig) || is_z_comparison(sig)) {
+    for(int i = 0; i < seq.size(); ++i) { to_int(seq[i]); }
+  }
+  else if(sig == lala::IN) {
+    to_int(seq[0]);
+  }
+  else if(is_logical(sig)) {
+    for(int i = 0; i < seq.size(); ++i) { to_bool(seq[i]); }
+  }
+  else if(sig == ITE && seq.size() == 3) {
+    to_bool(seq[0]);
+    if(is_bool(seq[1]) != is_bool(seq[2])) {
+      to_int(seq[1]);
+      to_int(seq[2]);
+    }
+  }
   return F::make_nary(sig, std::move(seq));
 }
 
@@ -653,12 +675,12 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintIntension(string id, Tree 
 
 lala::Sig convert(OrderType op) {
   switch(op) {
-    case LT: return lala::LT;
-    case LE: return lala::LEQ;
-    case GT: return lala::GT;
-    case GE: return lala::GEQ;
-    case EQ: return lala::EQ;
-    case NE: return lala::NEQ;
+    case LT: return lala::ZLT;
+    case LE: return lala::ZLEQ;
+    case GT: return lala::ZGT;
+    case GE: return lala::ZGEQ;
+    case EQ: return lala::ZEQ;
+    case NE: return lala::ZNEQ;
     case IN: return lala::IN;
     default:
       throw std::runtime_error("convert: unsupported operator");
@@ -675,7 +697,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintPrimitive(string id, Order
     F::make_binary(
       F::make_binary(
         F::make_lvar(UNTYPED, lala::LVar<Allocator>(x->id.c_str())),
-        lala::SUB,
+        lala::ZSUB,
         F::make_lvar(UNTYPED, lala::LVar<Allocator>(y->id.c_str()))),
       convert(op),
       F::make_z(-k)));
@@ -748,7 +770,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferent(string id, ve
     for(int j = i+1; j < list.size(); ++j) {
       constraints.push_back(F::make_binary(
         F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())),
-        lala::NEQ,
+        lala::ZNEQ,
         F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str()))
       ));
     }
@@ -922,9 +944,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
   for(int i=0;i<list.size();i++) {
     auto var = list[i];
     auto coeff = coeffs[i];
-    seq.push_back(F::make_binary(to_lala_logical_variable(var),lala::Sig::MUL,F::make_z(coeff)));
+    seq.push_back(F::make_binary(to_lala_logical_variable(var),lala::Sig::ZMUL,F::make_z(coeff)));
   }
-  auto add = F::make_nary(lala::ADD,seq);
+  auto add = F::make_nary(lala::ZADD,seq);
   constraints.push_back(F::make_binary(std::move(add),sig,right));
 
 }
@@ -944,7 +966,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
   for(auto var : list) {
     seq.push_back(to_lala_logical_variable(var));
   }
-  auto add = F::make_nary(lala::ADD,seq);
+  auto add = F::make_nary(lala::ZADD,seq);
   constraints.push_back(F::make_binary(std::move(add),sig,right));
 }
 
@@ -971,9 +993,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintSum(string, vector<XVariab
   for(int i=0;i<list.size();i++) {
     auto var = list[i];
     auto coeff = coeffs[i];
-    seq.push_back(F::make_binary(to_lala_logical_variable(var), lala::Sig::MUL, to_lala_logical_variable(coeff)));
+    seq.push_back(F::make_binary(to_lala_logical_variable(var), lala::Sig::ZMUL, to_lala_logical_variable(coeff)));
   }
-  auto add = F::make_nary(lala::ADD,seq);
+  auto add = F::make_nary(lala::ZADD,seq);
   constraints.push_back(F::make_binary(std::move(add),sig,right));
 }
 
@@ -1291,7 +1313,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
   auto v = F::make_z(value);
   FSeq seq;
   for(auto & variable : list) {
-    seq.push_back(F::make_binary(to_lala_logical_variable(variable), lala::EQ, v));
+    seq.push_back(F::make_binary(to_lala_logical_variable(variable), lala::ZEQ, v));
   }
   constraints.push_back(F::make_nary(lala::OR, std::move(seq)));
 
@@ -1309,7 +1331,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
   auto v = to_lala_logical_variable(value);
   FSeq seq;
   for(auto & variable : list) {
-    seq.push_back(F::make_binary(to_lala_logical_variable(variable), lala::EQ,  v));
+    seq.push_back(F::make_binary(to_lala_logical_variable(variable), lala::ZEQ,  v));
   }
   constraints.push_back(F::make_nary(lala::OR, std::move(seq)));
 }
@@ -1319,7 +1341,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string id, vector<
   for(int i = 0; i < list.size(); ++i) {
     // index = (i+1) ==> varName = value
     constraints.push_back(F::make_binary(
-      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      F::make_binary(to_lala_logical_variable(index), lala::ZEQ,  F::make_z(i)),
       lala::IMPLY,
       F::make_binary(to_lala_logical_variable(list[i]), to_lala_operator(xc.op), to_lala_formula(xc))));
   }
@@ -1339,9 +1361,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string id, vector<
   for(int i = 0; i < list.size(); ++i) {
     // index = (i+1) ==> varName = value
     constraints.push_back(F::make_binary(
-      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      F::make_binary(to_lala_logical_variable(index), lala::ZEQ,  F::make_z(i)),
       lala::IMPLY,
-      F::make_binary(to_lala_logical_variable(list[i]), lala::EQ,  F::make_z(value))));
+      F::make_binary(to_lala_logical_variable(list[i]), lala::ZEQ,  F::make_z(value))));
   }
 }
 
@@ -1362,13 +1384,13 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string id, vector<
   for(int i = 0; i < matrix.size(); ++i) {
     for(int j=0;j<matrix[i].size();j++) {
       // index = (i+1) ==> varName = value
-      auto leftAnd = F::make_binary(to_lala_logical_variable(rowIndex), lala::EQ,  F::make_z(i));
-      auto rightAnd = F::make_binary(to_lala_logical_variable(colIndex), lala::EQ,  F::make_z(j));
+      auto leftAnd = F::make_binary(to_lala_logical_variable(rowIndex), lala::ZEQ,  F::make_z(i));
+      auto rightAnd = F::make_binary(to_lala_logical_variable(colIndex), lala::ZEQ,  F::make_z(j));
       auto andand = F::make_binary(leftAnd,lala::AND,rightAnd);
       constraints.push_back(F::make_binary(
         andand,
         lala::IMPLY,
-        F::make_binary(F::make_z(matrix[i][j]), lala::EQ,  to_lala_logical_variable(value))));
+        F::make_binary(F::make_z(matrix[i][j]), lala::ZEQ,  to_lala_logical_variable(value))));
     }
   }
 }
@@ -1387,9 +1409,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<XVa
   for(int i = 0; i < list.size(); ++i) {
     // index = (i+1) ==> varName = value
     constraints.push_back(F::make_binary(
-      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      F::make_binary(to_lala_logical_variable(index), lala::ZEQ,  F::make_z(i)),
       lala::IMPLY,
-      F::make_binary(to_lala_logical_variable(list[i]), lala::EQ,  to_lala_logical_variable(value))));
+      F::make_binary(to_lala_logical_variable(list[i]), lala::ZEQ,  to_lala_logical_variable(value))));
   }
 }
 
@@ -1407,9 +1429,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintElement(string, vector<int
   for(int i = 0; i < list.size(); ++i) {
     // index = (i+1) ==> varName = value
     constraints.push_back(F::make_binary(
-      F::make_binary(to_lala_logical_variable(index), lala::EQ,  F::make_z(i)),
+      F::make_binary(to_lala_logical_variable(index), lala::ZEQ,  F::make_z(i)),
       lala::IMPLY,
-      F::make_binary(F::make_z(list[i]), lala::EQ, to_lala_logical_variable(value))));
+      F::make_binary(F::make_z(list[i]), lala::ZEQ, to_lala_logical_variable(value))));
   }
 }
 
@@ -1575,10 +1597,10 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vect
       if(i == j) {
         continue;
       }
-      auto left = F::make_binary(to_lala_logical_variable(origins[i]), lala::LEQ, to_lala_logical_variable(origins[j]));
-      auto right = F::make_binary(to_lala_logical_variable(origins[j]), lala::LT, F::make_binary(to_lala_logical_variable(origins[i]), lala::ADD, F::make_z(lengths[i])));
+      auto left = F::make_binary(to_lala_logical_variable(origins[i]), lala::ZLEQ, to_lala_logical_variable(origins[j]));
+      auto right = F::make_binary(to_lala_logical_variable(origins[j]), lala::ZLT, F::make_binary(to_lala_logical_variable(origins[i]), lala::ZADD, F::make_z(lengths[i])));
       auto andand = F::make_binary(left, lala::AND, right);
-      auto bij = F::make_lvar(UNTYPED, buildAuxVariableInteger(1));
+      auto bij = F::make_lvar(UNTYPED, buildAuxVariableBoolean());
       vars.push_back(bij);
       auto equiv = F::make_binary(bij,lala::EQUIV,andand);
       constraints.push_back(equiv);
@@ -1594,9 +1616,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintCumulative(string id, vect
         continue;
       }
       auto index = i * (origins.size() - 1) + j;
-      sum.push_back(F::make_binary(F::make_z(heights[i]), lala::MUL, vars[index]));
+      sum.push_back(F::make_binary(F::make_z(heights[i]), lala::ZMUL, F::make_unary(lala::BOOL2INT, vars[index])));
     }
-    auto left = F::make_nary(lala::ADD, std::move(sum));
+    auto left = F::make_nary(lala::ZADD, std::move(sum));
     constraints.push_back(F::make_binary(left, to_lala_operator(xc.op), to_lala_formula(xc)));
   }
 }
@@ -1702,9 +1724,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjective(lala::Sig optimization_kin
   battery::vector<F> sequences;
   auto optVariable = F::make_lvar(UNTYPED, buildAuxVariableInteger());
   for(int i = 0; i < list.size(); i++) {
-    sequences.push_back(F::make_binary(F::make_lvar(UNTYPED, list[i]->id), lala::MUL, F::make_z(coefs[i])));
+    sequences.push_back(F::make_binary(F::make_lvar(UNTYPED, list[i]->id), lala::ZMUL, F::make_z(coefs[i])));
   }
-  constraints.push_back(F::make_binary(optVariable, lala::EQ, F::make_nary(lala::ADD, sequences)));
+  constraints.push_back(F::make_binary(optVariable, lala::ZEQ, F::make_nary(lala::ZADD, sequences)));
   constraints.push_back(F::make_unary(optimization_kind, optVariable));
 }
 
@@ -1741,7 +1763,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildObjective(lala::Sig optimization_kin
   for(int i = 0; i < list.size(); i++) {
     sequences.push_back(F::make_lvar(UNTYPED, list[i]->id));
   }
-  constraints.push_back(F::make_binary(optVariable, lala::EQ, F::make_nary(lala::ADD, sequences)));
+  constraints.push_back(F::make_binary(optVariable, lala::ZEQ, F::make_nary(lala::ZADD, sequences)));
   constraints.push_back(F::make_unary(optimization_kind, optVariable));
 }
 
@@ -1781,13 +1803,13 @@ void XCSP3_turbo_callbacks<Allocator>::buildAnnotationDecision(vector<XVariable*
 template<class Allocator>
 lala::Sig XCSP3_turbo_callbacks<Allocator>::to_lala_operator(OrderType op) {
   switch (op) {
-    case LE: return lala::Sig::LEQ;
-    case LT: return lala::Sig::LT;
-    case GE: return lala::Sig::GEQ;
-    case GT: return lala::Sig::GT;
+    case LE: return lala::Sig::ZLEQ;
+    case LT: return lala::Sig::ZLT;
+    case GE: return lala::Sig::ZGEQ;
+    case GT: return lala::Sig::ZGT;
     case IN: return lala::Sig::IN;
-    case NE: return lala::Sig::NEQ;
-    case EQ: return lala::Sig::EQ;
+    case NE: return lala::Sig::ZNEQ;
+    case EQ: return lala::Sig::ZEQ;
     default:
       throw std::runtime_error(op+" is not a supported operator type.");
   }
@@ -1818,8 +1840,8 @@ lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(
   lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
   auxiliaryVariables++;
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
-  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::LEQ, F::make_z(maxValue)));
-  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::GEQ, F::make_z(0)));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::ZLEQ, F::make_z(maxValue)));
+  constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::ZGEQ, F::make_z(0)));
   return auxVar;
 }
 
@@ -1828,6 +1850,14 @@ lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(
   lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
   auxiliaryVariables++;
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
+  return auxVar;
+}
+
+template <class Allocator>
+lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableBoolean() {
+  lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
+  auxiliaryVariables++;
+  variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Bool));
   return auxVar;
 }
 

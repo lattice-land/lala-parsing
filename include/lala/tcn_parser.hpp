@@ -18,15 +18,15 @@ namespace impl {
  *  Divisions and moduli use their lala names (tdiv, fdiv, cdiv, ediv, tmod, fmod, cmod, emod).
  */
 inline Sig tcn_symbol_to_sig(const std::string& sym) {
-  if(sym == "+") return ADD;
-  if(sym == "*") return MUL;
-  for(Sig sig : {TDIV, FDIV, CDIV, EDIV, TMOD, FMOD, CMOD, EMOD}) {
+  if(sym == "+") return ZADD;
+  if(sym == "*") return ZMUL;
+  for(Sig sig : {ZTDIV, ZFDIV, ZCDIV, ZEDIV, ZTMOD, ZFMOD, ZCMOD, ZEMOD}) {
     if(sym == string_of_sig(sig)) return sig;
   }
-  if(sym == "A") return MAX;
-  if(sym == "I") return MIN;
-  if(sym == "L") return LEQ;
-  if(sym == "=") return EQ;
+  if(sym == "A") return ZMAX;
+  if(sym == "I") return ZMIN;
+  if(sym == "L") return ZLEQ;
+  if(sym == "=") return ZEQ;
   std::cerr << "TCN parser: unknown operator '" << sym << "'" << std::endl;
   exit(EXIT_FAILURE);
 }
@@ -124,7 +124,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
       }
       conjuncts.push_back(F::make_binary(
         F::make_lvar(UNTYPED, LVar<Allocator>(name.data())),
-        GEQ,
+        ZGEQ,
         F::make_z(lb)));
     }
 
@@ -139,7 +139,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
       }
       conjuncts.push_back(F::make_binary(
         F::make_lvar(UNTYPED, LVar<Allocator>(name.data())),
-        LEQ,
+        ZLEQ,
         F::make_z(ub)));
     }
   }
@@ -166,7 +166,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
     // Encode: x_x = x_y op x_z
     conjuncts.push_back(F::make_binary(
       F::make_lvar(UNTYPED, LVar<Allocator>(var_name(x).data())),
-      EQ,
+      ZEQ,
       F::make_binary(
         F::make_lvar(UNTYPED, LVar<Allocator>(var_name(y).data())),
         op,

@@ -310,7 +310,7 @@ public:
         for(int i = 0; i < array.seq().size(); ++i) {
           decl.push_back(F::make_binary(
             F::make_lvar(UNTYPED, LVar<Allocator>(make_array_access(name, i))),
-            EQ,
+            eq_of_decl(decl[i]),
             array.seq(i)));
         }
       }
@@ -346,6 +346,37 @@ public:
       return std::move(formula);
     }
 
+    /** The equality predicate suited to a sort: `EQUIV` for Booleans, `ZEQ` for integers, `REQ` for real numbers and the polymorphic `EQ` otherwise (sets). */
+    static Sig eq_of_sort(const Sort<allocator_type>& sort) {
+      if(sort.is_bool()) { return EQUIV; }
+      else if(sort.is_int()) { return ZEQ; }
+      else if(sort.is_real()) { return REQ; }
+      else { return EQ; }
+    }
+
+    /** The equality predicate suited to the result of the function symbol `sig`. */
+    static Sig eq_of_result(Sig sig) {
+      auto sort = result_sort_of<allocator_type>(sig);
+      return sort.has_value() ? eq_of_sort(*sort) : EQ;
+    }
+
+    /** The equality predicate suited to the constant `c`. */
+    static Sig eq_of_value(const F& c) {
+      auto sort = c.sort();
+      return sort.has_value() ? eq_of_sort(*sort) : EQ;
+    }
+
+    /** The equality predicate suited to the variable declared in `decl` (an existential, possibly in a conjunction). */
+    static Sig eq_of_decl(const F& decl) {
+      if(decl.is(F::E)) {
+        return eq_of_sort(battery::get<1>(decl.exists()));
+      }
+      else if(decl.is(F::Seq) && decl.sig() == AND && decl.seq().size() > 0) {
+        return eq_of_decl(decl.seq(0));
+      }
+      return EQ;
+    }
+
     F make_binary(Sig sig, const SV &sv) {
       if(sv.size() != 3) {
         return make_arity_error(sv, sig, 2, static_cast<int>(sv.size()/*size_t*/) - 1);
@@ -353,7 +384,11 @@ public:
       return F::make_binary(f(sv[1]), sig, f(sv[2]));
     }
 
-    F make_unary_fun_eq(Sig sig, const SV &sv, Sig eq_kind = EQ) {
+    F make_unary_fun_eq(Sig sig, const SV &sv) {
+      return make_unary_fun_eq(sig, sv, eq_of_result(sig));
+    }
+
+    F make_unary_fun_eq(Sig sig, const SV &sv, Sig eq_kind) {
       if(sv.size() != 3) {
         return make_arity_error(sv, sig, 1, static_cast<int>(sv.size()) - 2);
       }
@@ -368,7 +403,11 @@ public:
       return F::make_unary(sig, f(sv[1]));
     }
 
-    F make_binary_fun_eq(Sig sig, const SV &sv, Sig eq_kind = EQ) {
+    F make_binary_fun_eq(Sig sig, const SV &sv) {
+      return make_binary_fun_eq(sig, sv, eq_of_result(sig));
+    }
+
+    F make_binary_fun_eq(Sig sig, const SV &sv, Sig eq_kind) {
       if(sv.size() != 4) {
         return make_arity_error(sv, sig, 2, static_cast<int>(sv.size()) - 2);
       }
@@ -402,62 +441,94 @@ public:
       auto left = f(sv[1]);
       auto right = resolve_array(sv, sv[2]);
       if(!right.is(F::Seq)) { return right; }
-      return F::make_binary(left, EQ, F::make_nary(sig, right.seq()));
+      return F::make_binary(left, eq_of_result(sig), F::make_nary(sig, right.seq()));
     }
 
     F make_float_in(const SV &sv) {
       return F::make_binary(
-          F::make_binary(f(sv[1]), GEQ, f(sv[2])),
+          F::make_binary(f(sv[1]), RGEQ, f(sv[2])),
           AND,
-          F::make_binary(f(sv[1]), LEQ, f(sv[3])));
+          F::make_binary(f(sv[1]), RLEQ, f(sv[3])));
     }
 
     F make_log(int base, const SV &sv) {
-      return F::make_binary(f(sv[1]), LOG, F::make_z(base));
+      return F::make_binary(f(sv[1]), RLOG, F::make_real(base, base));
     }
 
     F make_log_eq(int base, const SV &sv) {
-      return F::make_binary(make_log(base, sv), EQ, f(sv[2]));
+      if(sv.size() != 3) {
+        return make_arity_error(sv, RLOG, 1, static_cast<int>(sv.size()) - 2);
+      }
+      return F::make_binary(make_log(base, sv), REQ, f(sv[2]));
+    }
+
+    /** `bool2int(a, b)`: b = bool2int(a). */
+    F make_bool2int(const SV &sv) {
+      if(sv.size() != 3) {
+        return make_arity_error(sv, BOOL2INT, 1, static_cast<int>(sv.size()) - 2);
+      }
+      return F::make_binary(F::make_unary(BOOL2INT, f(sv[1])), ZEQ, f(sv[2]));
+    }
+
+    /** `int2float(a, b)`: b = int2real(a). */
+    F make_int2float(const SV &sv) {
+      if(sv.size() != 3) {
+        return make_arity_error(sv, INT2REAL, 1, static_cast<int>(sv.size()) - 2);
+      }
+      return F::make_binary(F::make_unary(INT2REAL, f(sv[1])), REQ, f(sv[2]));
+    }
+
+    /** `bool_lt(a, b)`: a < b, that is, `not a /\ b`. */
+    F make_bool_lt(const SV &sv) {
+      if(sv.size() != 3) {
+        return make_arity_error(sv, AND, 2, static_cast<int>(sv.size()) - 1);
+      }
+      return F::make_binary(F::make_unary(NOT, f(sv[1])), AND, f(sv[2]));
     }
 
     F predicate_call(const SV &sv) {
       auto name = std::any_cast<std::string>(sv[0]);
-      if (name == "int_le") { return make_binary(LEQ, sv); }
-      if (name == "int_lt") { return make_binary(LT, sv); }
-      if (name == "int_ge") { return make_binary(GEQ, sv); }
-      if (name == "int_gt") { return make_binary(GT, sv); }
-      if (name == "int_eq") { return make_binary(EQ, sv); }
-      if (name == "int_ne") { return make_binary(NEQ, sv); }
-      if (name == "int_abs") { return make_unary_fun_eq(ABS, sv); }
-      if (name == "int_neg") { return make_unary_fun_eq(NEG, sv); }
-      if (name == "int_div") { return make_binary_fun_eq(TDIV, sv); }
-      if (name == "int_ediv") { return make_binary_fun_eq(EDIV, sv); }
-      if (name == "int_tdiv") { return make_binary_fun_eq(TDIV, sv); }
-      if (name == "int_cdiv") { return make_binary_fun_eq(CDIV, sv); }
-      if (name == "int_fdiv") { return make_binary_fun_eq(FDIV, sv); }
-      if (name == "int_mod") { return make_binary_fun_eq(TMOD, sv); }
-      if (name == "int_emod") { return make_binary_fun_eq(EMOD, sv); }
-      if (name == "int_tmod") { return make_binary_fun_eq(TMOD, sv); }
-      if (name == "int_cmod") { return make_binary_fun_eq(CMOD, sv); }
-      if (name == "int_fmod") { return make_binary_fun_eq(FMOD, sv); }
-      if (name == "int_plus") { return make_binary_fun_eq(ADD, sv); }
-      if (name == "int_minus") { return make_binary_fun_eq(SUB, sv); }
-      if (name == "int_pow") { return make_binary_fun_eq(POW, sv); }
-      if (name == "int_times") { return make_binary_fun_eq(MUL, sv); }
-      if (name == "int_max") { return make_binary_fun_eq(MAX, sv); }
-      if (name == "int_min") { return make_binary_fun_eq(MIN, sv); }
-      if (name == "int_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
-      if (name == "int_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
-      if (name == "int_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
-      if (name == "int_ne_reif") { return make_binary_fun_eq(NEQ, sv, EQUIV); }
-      if (name == "bool2int") { return make_binary(EQ, sv); }
-      if (name == "bool_eq") { return make_binary(EQ, sv); }
-      if (name == "bool_le") { return make_binary(LEQ, sv); }
-      if (name == "bool_lt") { return make_binary(LT, sv); }
+      if (name == "int_le") { return make_binary(ZLEQ, sv); }
+      if (name == "int_lt") { return make_binary(ZLT, sv); }
+      if (name == "int_ge") { return make_binary(ZGEQ, sv); }
+      if (name == "int_gt") { return make_binary(ZGT, sv); }
+      if (name == "int_eq") { return make_binary(ZEQ, sv); }
+      if (name == "int_ne") { return make_binary(ZNEQ, sv); }
+      if (name == "int_abs") { return make_unary_fun_eq(ZABS, sv); }
+      if (name == "int_neg") { return make_unary_fun_eq(ZNEG, sv); }
+      if (name == "int_div") { return make_binary_fun_eq(ZTDIV, sv); }
+      if (name == "int_ediv") { return make_binary_fun_eq(ZEDIV, sv); }
+      if (name == "int_tdiv") { return make_binary_fun_eq(ZTDIV, sv); }
+      if (name == "int_cdiv") { return make_binary_fun_eq(ZCDIV, sv); }
+      if (name == "int_fdiv") { return make_binary_fun_eq(ZFDIV, sv); }
+      if (name == "int_mod") { return make_binary_fun_eq(ZTMOD, sv); }
+      if (name == "int_emod") { return make_binary_fun_eq(ZEMOD, sv); }
+      if (name == "int_tmod") { return make_binary_fun_eq(ZTMOD, sv); }
+      if (name == "int_cmod") { return make_binary_fun_eq(ZCMOD, sv); }
+      if (name == "int_fmod") { return make_binary_fun_eq(ZFMOD, sv); }
+      if (name == "int_plus") { return make_binary_fun_eq(ZADD, sv); }
+      if (name == "int_minus") { return make_binary_fun_eq(ZSUB, sv); }
+      if (name == "int_pow") { return make_binary_fun_eq(ZPOW, sv); }
+      if (name == "int_times") { return make_binary_fun_eq(ZMUL, sv); }
+      if (name == "int_max") { return make_binary_fun_eq(ZMAX, sv); }
+      if (name == "int_min") { return make_binary_fun_eq(ZMIN, sv); }
+      if (name == "int_eq_reif") { return make_binary_fun_eq(ZEQ, sv, EQUIV); }
+      if (name == "int_le_reif") { return make_binary_fun_eq(ZLEQ, sv, EQUIV); }
+      if (name == "int_lt_reif") { return make_binary_fun_eq(ZLT, sv, EQUIV); }
+      if (name == "int_ne_reif") { return make_binary_fun_eq(ZNEQ, sv, EQUIV); }
+      if (name == "bool2int") { return make_bool2int(sv); }
+      if (name == "bool_eq") { return make_binary(EQUIV, sv); }
+      if (name == "bool_le") { return make_binary(IMPLY, sv); }
+      if (name == "bool_lt") { return make_bool_lt(sv); }
       if (name == "bool_imply") { return make_binary(IMPLY, sv); }
-      if (name == "bool_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
-      if (name == "bool_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
-      if (name == "bool_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
+      if (name == "bool_eq_reif") { return make_binary_fun_eq(EQUIV, sv, EQUIV); }
+      if (name == "bool_le_reif") { return make_binary_fun_eq(IMPLY, sv, EQUIV); }
+      if (name == "bool_lt_reif") {
+        if(sv.size() != 4) {
+          return make_arity_error(sv, AND, 3, static_cast<int>(sv.size()) - 1);
+        }
+        return F::make_binary(F::make_binary(F::make_unary(NOT, f(sv[1])), AND, f(sv[2])), EQUIV, f(sv[3]));
+      }
       if (name == "bool_and") { return make_binary_fun_eq(AND, sv, EQUIV); }
       if (name == "bool_not") {
         if(sv.size() == 3) { return make_binary(XOR, sv); }
@@ -477,57 +548,57 @@ public:
       if (name == "set_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
       if (name == "set_in") { return make_binary(IN, sv); }
       if (name == "set_in_reif") { return make_binary_fun_eq(IN, sv, EQUIV); }
-      if (name == "set_intersect") { return make_binary_fun_eq(INTERSECTION, sv, EQUIV); }
-      if (name == "set_union") { return make_binary_fun_eq(UNION, sv, EQUIV); }
+      if (name == "set_intersect") { return make_binary_fun_eq(INTERSECTION, sv); }
+      if (name == "set_union") { return make_binary_fun_eq(UNION, sv); }
       if (name == "set_ne") { return make_binary(NEQ, sv); }
       if (name == "set_ne_reif") { return make_binary_fun_eq(NEQ, sv, EQUIV); }
       if (name == "set_subset") { return make_binary(SUBSETEQ, sv); }
       if (name == "set_subset_reif") { return make_binary_fun_eq(SUBSETEQ, sv, EQUIV); }
       if (name == "set_superset") { return make_binary(SUPSETEQ, sv); }
-      if (name == "set_symdiff") { return make_binary_fun_eq(SYMMETRIC_DIFFERENCE, sv, EQUIV); }
+      if (name == "set_symdiff") { return make_binary_fun_eq(SYMMETRIC_DIFFERENCE, sv); }
       if (name == "set_le") { return make_binary(LEQ, sv); }
       if (name == "set_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
       if (name == "set_lt") { return make_binary(LT, sv); }
       if (name == "set_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
-      if (name == "float_abs") { return make_binary_fun_eq(ABS, sv); }
-      if (name == "float_neg") { return make_binary_fun_eq(NEG, sv); }
-      if (name == "float_plus") { return make_binary_fun_eq(ADD, sv); }
-      if (name == "float_minus") { return make_binary_fun_eq(SUB, sv); }
-      if (name == "float_times") { return make_binary_fun_eq(MUL, sv); }
-      if (name == "float_acos") { return make_unary_fun_eq(ACOS, sv); }
-      if (name == "float_acosh") { return make_unary_fun_eq(ACOSH, sv); }
-      if (name == "float_asin") { return make_unary_fun_eq(ASIN, sv); }
-      if (name == "float_asinh") { return make_unary_fun_eq(ASINH, sv); }
-      if (name == "float_atan") { return make_unary_fun_eq(ATAN, sv); }
-      if (name == "float_atanh") { return make_unary_fun_eq(ATANH, sv); }
-      if (name == "float_cos") { return make_unary_fun_eq(COS, sv); }
-      if (name == "float_cosh") { return make_unary_fun_eq(COSH, sv); }
-      if (name == "float_sin") { return make_unary_fun_eq(SIN, sv); }
-      if (name == "float_sinh") { return make_unary_fun_eq(SINH, sv); }
-      if (name == "float_tan") { return make_unary_fun_eq(TAN, sv); }
-      if (name == "float_tanh") { return make_unary_fun_eq(TANH, sv); }
-      if (name == "float_div") { return make_binary(DIV, sv); }
-      if (name == "float_eq") { return make_binary(EQ, sv); }
-      if (name == "float_eq_reif") { return make_binary_fun_eq(EQ, sv, EQUIV); }
-      if (name == "float_le") { return make_binary(LEQ, sv); }
-      if (name == "float_le_reif") { return make_binary_fun_eq(LEQ, sv, EQUIV); }
-      if (name == "float_ne") { return make_binary(NEQ, sv); }
-      if (name == "float_ne_reif") { return make_binary_fun_eq(NEQ, sv, EQUIV); }
-      if (name == "float_lt") { return make_binary(LT, sv); }
-      if (name == "float_lt_reif") { return make_binary_fun_eq(LT, sv, EQUIV); }
+      if (name == "float_abs") { return make_unary_fun_eq(RABS, sv); }
+      if (name == "float_neg") { return make_unary_fun_eq(RNEG, sv); }
+      if (name == "float_plus") { return make_binary_fun_eq(RADD, sv); }
+      if (name == "float_minus") { return make_binary_fun_eq(RSUB, sv); }
+      if (name == "float_times") { return make_binary_fun_eq(RMUL, sv); }
+      if (name == "float_acos") { return make_unary_fun_eq(RACOS, sv); }
+      if (name == "float_acosh") { return make_unary_fun_eq(RACOSH, sv); }
+      if (name == "float_asin") { return make_unary_fun_eq(RASIN, sv); }
+      if (name == "float_asinh") { return make_unary_fun_eq(RASINH, sv); }
+      if (name == "float_atan") { return make_unary_fun_eq(RATAN, sv); }
+      if (name == "float_atanh") { return make_unary_fun_eq(RATANH, sv); }
+      if (name == "float_cos") { return make_unary_fun_eq(RCOS, sv); }
+      if (name == "float_cosh") { return make_unary_fun_eq(RCOSH, sv); }
+      if (name == "float_sin") { return make_unary_fun_eq(RSIN, sv); }
+      if (name == "float_sinh") { return make_unary_fun_eq(RSINH, sv); }
+      if (name == "float_tan") { return make_unary_fun_eq(RTAN, sv); }
+      if (name == "float_tanh") { return make_unary_fun_eq(RTANH, sv); }
+      if (name == "float_div") { return make_binary_fun_eq(RDIV, sv); }
+      if (name == "float_eq") { return make_binary(REQ, sv); }
+      if (name == "float_eq_reif") { return make_binary_fun_eq(REQ, sv, EQUIV); }
+      if (name == "float_le") { return make_binary(RLEQ, sv); }
+      if (name == "float_le_reif") { return make_binary_fun_eq(RLEQ, sv, EQUIV); }
+      if (name == "float_ne") { return make_binary(RNEQ, sv); }
+      if (name == "float_ne_reif") { return make_binary_fun_eq(RNEQ, sv, EQUIV); }
+      if (name == "float_lt") { return make_binary(RLT, sv); }
+      if (name == "float_lt_reif") { return make_binary_fun_eq(RLT, sv, EQUIV); }
       if (name == "float_in") { return make_float_in(sv); }
       if (name == "float_in_reif") {
         return F::make_binary(make_float_in(sv), EQUIV, f(sv[4]));
       }
       if (name == "float_log10") { return make_log_eq(10, sv); }
       if (name == "float_log2") { return make_log_eq(2, sv); }
-      if (name == "float_min") { return make_binary_fun_eq(MIN, sv); }
-      if (name == "float_max") { return make_binary_fun_eq(MAX, sv); }
-      if (name == "float_exp") { return make_unary_fun_eq(EXP, sv); }
-      if (name == "float_ln") { return make_unary_fun_eq(LN, sv); }
-      if (name == "float_pow") { return make_binary_fun_eq(POW, sv); }
-      if (name == "float_sqrt") { return make_unary_fun_eq(SQRT, sv); }
-      if (name == "int2float") { return make_binary(EQ, sv); }
+      if (name == "float_min") { return make_binary_fun_eq(RMIN, sv); }
+      if (name == "float_max") { return make_binary_fun_eq(RMAX, sv); }
+      if (name == "float_exp") { return make_unary_fun_eq(REXP, sv); }
+      if (name == "float_ln") { return make_unary_fun_eq(RLN, sv); }
+      if (name == "float_pow") { return make_binary_fun_eq(RPOW, sv); }
+      if (name == "float_sqrt") { return make_unary_fun_eq(RSQRT, sv); }
+      if (name == "int2float") { return make_int2float(sv); }
       if (name == "array_int_element" || name == "array_var_int_element"
         || name == "array_bool_element" || name == "array_var_bool_element"
         || name == "array_set_element" || name == "array_var_set_element"
@@ -535,28 +606,24 @@ public:
       {
         return make_element_constraint(name, sv);
       }
-      if (name == "array_int_minimum" || name == "array_float_minimum")
-      {
-        return make_nary_fun_eq(MIN, sv);
-      }
-      if (name == "array_int_maximum" || name == "array_float_maximum")
-      {
-        return make_nary_fun_eq(MAX, sv);
-      }
+      if (name == "array_int_minimum") { return make_nary_fun_eq(ZMIN, sv); }
+      if (name == "array_float_minimum") { return make_nary_fun_eq(RMIN, sv); }
+      if (name == "array_int_maximum") { return make_nary_fun_eq(ZMAX, sv); }
+      if (name == "array_float_maximum") { return make_nary_fun_eq(RMAX, sv); }
       if (name == "int_lin_eq" || name == "bool_lin_eq" || name == "float_lin_eq" ||
               name == "int_lin_eq_reif" || name == "bool_lin_eq_reif" || name == "float_lin_eq_reif")
       {
-        return make_linear_constraint(name, EQ, sv);
+        return make_linear_constraint(name, ZEQ, sv);
       }
       if (name == "int_lin_le" || name == "bool_lin_le" || name == "float_lin_le" ||
               name == "int_lin_le_reif" || name == "bool_lin_le_reif" || name == "float_lin_le_reif")
       {
-        return make_linear_constraint(name, LEQ, sv);
+        return make_linear_constraint(name, ZLEQ, sv);
       }
       if (name == "int_lin_ne" || name == "bool_lin_ne" || name == "float_lin_ne" ||
               name == "int_lin_ne_reif" || name == "bool_lin_ne_reif" || name == "float_lin_ne_reif")
       {
-        return make_linear_constraint(name, NEQ, sv);
+        return make_linear_constraint(name, ZNEQ, sv);
       }
       if (name == "array_bool_and") { return make_boolean_constraint(name, AND, sv); }
       if (name == "array_bool_or") { return make_boolean_constraint(name, OR, sv); }
@@ -591,20 +658,22 @@ public:
       }
       else {
         error = err;
-        if(name == "int_abs") { return make_unary_fun(ABS, sv); }
-        if (name == "int_neg") { return make_unary_fun(NEG, sv); }
-        if (name == "int_div") { return make_binary_fun(TDIV, sv); }
-        if (name == "int_ediv") { return make_binary_fun(EDIV, sv); }
-        if (name == "int_fdiv") { return make_binary_fun(FDIV, sv); }
-        if (name == "int_cdiv") { return make_binary_fun(CDIV, sv); }
-        if (name == "int_tdiv") { return make_binary_fun(TDIV, sv); }
-        if (name == "int_mod") { return make_binary_fun(EMOD, sv); }
-        if (name == "int_plus") { return make_binary_fun(ADD, sv); }
-        if (name == "int_minus") { return make_binary_fun(SUB, sv); }
-        if (name == "int_pow") { return make_binary_fun(POW, sv); }
-        if (name == "int_times") { return make_binary_fun(MUL, sv); }
-        if (name == "int_max") { return make_binary_fun(MAX, sv); }
-        if (name == "int_min") { return make_binary_fun(MIN, sv); }
+        if (name == "int_abs") { return make_unary_fun(ZABS, sv); }
+        if (name == "int_neg") { return make_unary_fun(ZNEG, sv); }
+        if (name == "int_div") { return make_binary_fun(ZTDIV, sv); }
+        if (name == "int_ediv") { return make_binary_fun(ZEDIV, sv); }
+        if (name == "int_fdiv") { return make_binary_fun(ZFDIV, sv); }
+        if (name == "int_cdiv") { return make_binary_fun(ZCDIV, sv); }
+        if (name == "int_tdiv") { return make_binary_fun(ZTDIV, sv); }
+        if (name == "int_mod") { return make_binary_fun(ZTMOD, sv); }
+        if (name == "int_plus") { return make_binary_fun(ZADD, sv); }
+        if (name == "int_minus") { return make_binary_fun(ZSUB, sv); }
+        if (name == "int_pow") { return make_binary_fun(ZPOW, sv); }
+        if (name == "int_times") { return make_binary_fun(ZMUL, sv); }
+        if (name == "int_max") { return make_binary_fun(ZMAX, sv); }
+        if (name == "int_min") { return make_binary_fun(ZMIN, sv); }
+        if (name == "bool2int") { return make_unary_fun(BOOL2INT, sv); }
+        if (name == "int2float") { return make_unary_fun(INT2REAL, sv); }
         if (name == "bool_and") { return make_binary_fun(AND, sv); }
         if (name == "bool_not") { return make_unary_fun(NOT, sv); }
         if (name == "bool_or") { return make_binary_fun(OR, sv); }
@@ -614,32 +683,32 @@ public:
         if (name == "set_intersect") { return make_binary_fun(INTERSECTION, sv); }
         if (name == "set_union") { return make_binary_fun(UNION, sv); }
         if (name == "set_symdiff") { return make_binary_fun(SYMMETRIC_DIFFERENCE, sv); }
-        if (name == "float_abs") { return make_binary_fun(ABS, sv); }
-        if (name == "float_neg") { return make_binary_fun(NEG, sv); }
-        if (name == "float_plus") { return make_binary_fun(ADD, sv); }
-        if (name == "float_minus") { return make_binary_fun(SUB, sv); }
-        if (name == "float_times") { return make_binary_fun(MUL, sv); }
-        if (name == "float_acos") { return make_unary_fun(ACOS, sv); }
-        if (name == "float_acosh") { return make_unary_fun(ACOSH, sv); }
-        if (name == "float_asin") { return make_unary_fun(ASIN, sv); }
-        if (name == "float_asinh") { return make_unary_fun(ASINH, sv); }
-        if (name == "float_atan") { return make_unary_fun(ATAN, sv); }
-        if (name == "float_atanh") { return make_unary_fun(ATANH, sv); }
-        if (name == "float_cos") { return make_unary_fun(COS, sv); }
-        if (name == "float_cosh") { return make_unary_fun(COSH, sv); }
-        if (name == "float_sin") { return make_unary_fun(SIN, sv); }
-        if (name == "float_sinh") { return make_unary_fun(SINH, sv); }
-        if (name == "float_tan") { return make_unary_fun(TAN, sv); }
-        if (name == "float_tanh") { return make_unary_fun(TANH, sv); }
-        if (name == "float_div") { return make_binary_fun(DIV, sv); }
+        if (name == "float_abs") { return make_unary_fun(RABS, sv); }
+        if (name == "float_neg") { return make_unary_fun(RNEG, sv); }
+        if (name == "float_plus") { return make_binary_fun(RADD, sv); }
+        if (name == "float_minus") { return make_binary_fun(RSUB, sv); }
+        if (name == "float_times") { return make_binary_fun(RMUL, sv); }
+        if (name == "float_acos") { return make_unary_fun(RACOS, sv); }
+        if (name == "float_acosh") { return make_unary_fun(RACOSH, sv); }
+        if (name == "float_asin") { return make_unary_fun(RASIN, sv); }
+        if (name == "float_asinh") { return make_unary_fun(RASINH, sv); }
+        if (name == "float_atan") { return make_unary_fun(RATAN, sv); }
+        if (name == "float_atanh") { return make_unary_fun(RATANH, sv); }
+        if (name == "float_cos") { return make_unary_fun(RCOS, sv); }
+        if (name == "float_cosh") { return make_unary_fun(RCOSH, sv); }
+        if (name == "float_sin") { return make_unary_fun(RSIN, sv); }
+        if (name == "float_sinh") { return make_unary_fun(RSINH, sv); }
+        if (name == "float_tan") { return make_unary_fun(RTAN, sv); }
+        if (name == "float_tanh") { return make_unary_fun(RTANH, sv); }
+        if (name == "float_div") { return make_binary_fun(RDIV, sv); }
         if (name == "float_log10") { return make_log(10, sv); }
         if (name == "float_log2") { return make_log(2, sv); }
-        if (name == "float_min") { return make_binary_fun(MIN, sv); }
-        if (name == "float_max") { return make_binary_fun(MAX, sv); }
-        if (name == "float_exp") { return make_unary_fun(EXP, sv); }
-        if (name == "float_ln") { return make_unary_fun(LN, sv); }
-        if (name == "float_pow") { return make_binary_fun(POW, sv); }
-        if (name == "float_sqrt") { return make_unary_fun(SQRT, sv); }
+        if (name == "float_min") { return make_binary_fun(RMIN, sv); }
+        if (name == "float_max") { return make_binary_fun(RMAX, sv); }
+        if (name == "float_exp") { return make_unary_fun(REXP, sv); }
+        if (name == "float_ln") { return make_unary_fun(RLN, sv); }
+        if (name == "float_pow") { return make_binary_fun(RPOW, sv); }
+        if (name == "float_sqrt") { return make_unary_fun(RSQRT, sv); }
         return make_error(sv, "Unknown function or predicate symbol `" + name + "`");
       }
     }
@@ -677,10 +746,11 @@ public:
       auto name = std::any_cast<std::string>(sv[1]);
       auto var_decl = make_variable_decl(sv, name, sv[0], sv[2]);
       if(sv.size() == 4) {
+        Sig eq = eq_of_decl(var_decl);
         return F::make_binary(std::move(var_decl), AND,
           F::make_binary(
             F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())),
-            EQ,
+            eq,
             f(sv[3])));
       }
       else {
@@ -715,13 +785,16 @@ public:
         return array;
       }
       auto value = f(sv[3]);
+      Sig eq = name.find("bool") != std::string::npos ? EQUIV
+        : (name.find("float") != std::string::npos ? REQ
+        : (name.find("set") != std::string::npos ? EQ : ZEQ));
       FSeq seq;
       for(int i = 0; i < array.seq().size(); ++i) {
         // index = (i+1) ==> varName = value
         seq.push_back(F::make_binary(
-          F::make_binary(index, EQ, F::make_z(i+1)),
+          F::make_binary(index, ZEQ, F::make_z(i+1)),
           IMPLY,
-          F::make_binary(array.seq(i), EQ, value)));
+          F::make_binary(array.seq(i), eq, value)));
       }
       return F::make_nary(AND, std::move(seq));
     }
@@ -792,6 +865,7 @@ public:
       return F::make_nary(AND, std::move(seq));
     }
 
+    /** `sig` is the integer comparison (`ZEQ`, `ZLEQ` or `ZNEQ`), it is mapped to the real comparison for `float_lin_*` constraints. */
     F make_linear_constraint(const std::string& name, Sig sig, const SV& sv) {
       if(sv.size() != 4 && sv.size() != 5) {
         return make_error(sv, "`" + name + "` expects 3 (or 4 if reified) parameters, but we got `" + std::to_string(sv.size() - 1) + "` parameters");
@@ -804,14 +878,21 @@ public:
       if(as.seq().size() != bs.seq().size()) {
         return make_error(sv, "`" + name + "` expects arrays of the same size.");
       }
+      bool is_float = name.starts_with("float_");
+      bool is_bool = name.starts_with("bool_");
+      Sig mul = is_float ? RMUL : ZMUL;
+      Sig add = is_float ? RADD : ZADD;
+      if(is_float) {
+        sig = sig == ZEQ ? REQ : (sig == ZLEQ ? RLEQ : RNEQ);
+      }
       FSeq sum;
       for(int i = 0; i < as.seq().size(); ++i) {
-        sum.push_back(F::make_binary(as.seq(i), MUL, bs.seq(i)));
+        sum.push_back(F::make_binary(as.seq(i), mul, is_bool ? F::make_unary(BOOL2INT, bs.seq(i)) : bs.seq(i)));
       }
       F linearCons =
           sum.size() == 1
         ? F::make_binary(std::move(sum[0]), sig, c)
-        : F::make_binary(F::make_nary(ADD, std::move(sum)), sig, c);
+        : F::make_binary(F::make_nary(add, std::move(sum)), sig, c);
       if(sv.size() == 5) { // reified version.
         return F::make_binary(f(sv[4]), EQUIV, std::move(linearCons));
       }
@@ -926,7 +1007,7 @@ public:
               if(!cell.is(F::S) && !cell.is(F::Z) && !cell.is(F::B)) {
                 return make_error(sv, "`" + name + "` expects each cell to be an integer, a set or a Boolean.");
               }
-              conjuncts.push_back(F::make_binary(var, EQ, cell));
+              conjuncts.push_back(F::make_binary(var, eq_of_value(cell), cell));
               break;
             }
             case TableKind::COMPRESSED: {
@@ -945,7 +1026,7 @@ public:
               }
               if(!is_wildcard(l, sort)) {
                 if(l.is(F::Z)) {
-                  conjuncts.push_back(F::make_binary(var, GEQ, l));
+                  conjuncts.push_back(F::make_binary(var, ZGEQ, l));
                 }
                 else {
                   conjuncts.push_back(F::make_binary(var, SUPSETEQ, l));
@@ -953,7 +1034,7 @@ public:
               }
               if(!is_wildcard(u, sort)) {
                 if(u.is(F::Z)) {
-                  conjuncts.push_back(F::make_binary(var, LEQ, u));
+                  conjuncts.push_back(F::make_binary(var, ZLEQ, u));
                 }
                 else {
                   conjuncts.push_back(F::make_binary(var, SUBSETEQ, u));

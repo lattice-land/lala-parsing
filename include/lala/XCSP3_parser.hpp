@@ -212,9 +212,9 @@ namespace XCSP3Core {
       F to_lala_formula(const XCondition & cond);
       F to_lala_logical_variable(XVariable *&variable);
       F to_lala_logical_variable(const string &variable);
-      lala::LVar<Allocator> buildAuxVariableInteger(size_t maxValue);
-      lala::LVar<Allocator> buildAuxVariableInteger();
-      lala::LVar<Allocator> buildAuxVariableBoolean();
+      lala::Symbol buildAuxVariableInteger(size_t maxValue);
+      lala::Symbol buildAuxVariableInteger();
+      lala::Symbol buildAuxVariableBoolean();
       void buildElementWithIndex(XVariable *index, int startIndex, RankType rank, const std::vector<F>& matches);
 
       public:
@@ -407,7 +407,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, int minVa
   if(debug) {
     cout << "    var " << id << " : " << minValue << "..." << maxValue << endl;
   }
-  lala::LVar<Allocator> lvar(id.c_str());
+  lala::Symbol lvar(id.c_str());
   output.add_var(id.c_str());
   variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), lala::ZLEQ, F::make_z(maxValue)));
@@ -421,7 +421,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildVariableInteger(string id, vector<in
     cout << "        ";
     displayList(values);
   }
-  lala::LVar<Allocator> lvar(id.c_str());
+  lala::Symbol lvar(id.c_str());
   output.add_var(id.c_str());
   variables.push_back(F::make_exists(UNTYPED, lvar, lala::Sort<Allocator>::Int));
 
@@ -466,7 +466,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, XVari
       return;
     }
     seq.push_back(
-      F::make_binary(F::make_lvar(UNTYPED, lala::LVar<Allocator>(variable->id.c_str())), sig, F::make_z(tuples[i])));
+      F::make_binary(F::make_lvar(UNTYPED, lala::Symbol(variable->id.c_str())), sig, F::make_z(tuples[i])));
   }
   if(seq.size() == 0) {
     // No support: the constraint is unsatisfiable. No conflict: it is always satisfied.
@@ -524,7 +524,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
     for (int i = 0; i < tuples.size(); ++i) {
       for (int j = 0; j < tuples[i].size(); ++j) {
         if (hasStar && tuples[i][j] == INT_MAX) {
-          t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>("*")));
+          t_seq.push_back(F::make_lvar(UNTYPED, lala::Symbol("*")));
         }
         else {
           t_seq.push_back(F::make_z(tuples[i][j]));
@@ -532,7 +532,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
       }
     }
     for (int i = 0; i < list.size(); ++i) {
-      t_seq.push_back(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())));
+      t_seq.push_back(F::make_lvar(UNTYPED, lala::Symbol(list[i]->id.c_str())));
     }
     constraints.push_back(F::make_nary("tables", std::move(t_seq)));
   }else {
@@ -546,7 +546,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintExtension(string id, vecto
         // Stars are not added in the conjunction.
         if (!hasStar || tuples[i][j] != INT_MAX) {
           internal_seq.push_back(
-            F::make_binary(F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str())), sig,
+            F::make_binary(F::make_lvar(UNTYPED, lala::Symbol(list[j]->id.c_str())), sig,
                            F::make_z(tuples[i][j])));
         }
       }
@@ -725,9 +725,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintPrimitive(string id, Order
   constraints.push_back(
     F::make_binary(
       F::make_binary(
-        F::make_lvar(UNTYPED, lala::LVar<Allocator>(x->id.c_str())),
+        F::make_lvar(UNTYPED, lala::Symbol(x->id.c_str())),
         lala::ZSUB,
-        F::make_lvar(UNTYPED, lala::LVar<Allocator>(y->id.c_str()))),
+        F::make_lvar(UNTYPED, lala::Symbol(y->id.c_str()))),
       convert(op),
       F::make_z(-k)));
 }
@@ -737,7 +737,7 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintPrimitive(string id, Order
   if(debug) {
     cout << "\n   constraint  " << id << ":" << x->id << " op " << k << "\n";
   }
-  lala::LVar<Allocator> lvar(x->id.c_str());
+  lala::Symbol lvar(x->id.c_str());
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, lvar), convert(op), F::make_z(k)));
 }
 
@@ -798,9 +798,9 @@ void XCSP3_turbo_callbacks<Allocator>::buildConstraintAlldifferent(string id, ve
   for(int i = 0; i < list.size() - 1; ++i) {
     for(int j = i+1; j < list.size(); ++j) {
       constraints.push_back(F::make_binary(
-        F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[i]->id.c_str())),
+        F::make_lvar(UNTYPED, lala::Symbol(list[i]->id.c_str())),
         lala::ZNEQ,
-        F::make_lvar(UNTYPED, lala::LVar<Allocator>(list[j]->id.c_str()))
+        F::make_lvar(UNTYPED, lala::Symbol(list[j]->id.c_str()))
       ));
     }
   }
@@ -1882,17 +1882,17 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::to_lala_fo
 
 template<class Allocator>
 XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::to_lala_logical_variable(XVariable *&variable) {
-  return F::make_lvar(UNTYPED, lala::LVar<Allocator>(variable->id.c_str()));
+  return F::make_lvar(UNTYPED, lala::Symbol(variable->id.c_str()));
 }
 
 template<class Allocator>
 XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::to_lala_logical_variable(const string &variable) {
-  return F::make_lvar(UNTYPED, lala::LVar<Allocator>(variable.c_str()));
+  return F::make_lvar(UNTYPED, lala::Symbol(variable.c_str()));
 }
 
 template <class Allocator>
-lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(size_t maxValue) {
-  lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
+lala::Symbol XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(size_t maxValue) {
+  lala::Symbol auxVar("aux_"+::std::to_string(auxiliaryVariables));
   auxiliaryVariables++;
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
   constraints.push_back(F::make_binary(F::make_lvar(UNTYPED, auxVar), lala::ZLEQ, F::make_z(maxValue)));
@@ -1901,16 +1901,16 @@ lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger(
 }
 
 template <class Allocator>
-lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger() {
-  lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
+lala::Symbol XCSP3_turbo_callbacks<Allocator>::buildAuxVariableInteger() {
+  lala::Symbol auxVar("aux_"+::std::to_string(auxiliaryVariables));
   auxiliaryVariables++;
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Int));
   return auxVar;
 }
 
 template <class Allocator>
-lala::LVar<Allocator> XCSP3_turbo_callbacks<Allocator>::buildAuxVariableBoolean() {
-  lala::LVar<Allocator> auxVar("aux_"+::std::to_string(auxiliaryVariables));
+lala::Symbol XCSP3_turbo_callbacks<Allocator>::buildAuxVariableBoolean() {
+  lala::Symbol auxVar("aux_"+::std::to_string(auxiliaryVariables));
   auxiliaryVariables++;
   variables.push_back(F::make_exists(UNTYPED, auxVar, lala::Sort<Allocator>::Bool));
   return auxVar;

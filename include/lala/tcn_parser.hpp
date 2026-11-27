@@ -110,7 +110,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
 
     // Declare variable as integer
     conjuncts.push_back(F::make_exists(UNTYPED,
-      LVar<Allocator>(name.data()),
+      SymID(name.data()),
       Sort<Allocator>(Sort<Allocator>::Int)));
 
     // Lower bound constraint (skip when "-inf")
@@ -123,7 +123,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
         return nullptr;
       }
       conjuncts.push_back(F::make_binary(
-        F::make_lvar(UNTYPED, LVar<Allocator>(name.data())),
+        F::make_lvar(UNTYPED, SymID(name.data())),
         ZGEQ,
         F::make_z(lb)));
     }
@@ -138,7 +138,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
         return nullptr;
       }
       conjuncts.push_back(F::make_binary(
-        F::make_lvar(UNTYPED, LVar<Allocator>(name.data())),
+        F::make_lvar(UNTYPED, SymID(name.data())),
         ZLEQ,
         F::make_z(ub)));
     }
@@ -165,12 +165,12 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
     Sig op = impl::tcn_symbol_to_sig(op_str);
     // Encode: x_x = x_y op x_z
     conjuncts.push_back(F::make_binary(
-      F::make_lvar(UNTYPED, LVar<Allocator>(var_name(x).data())),
+      F::make_lvar(UNTYPED, SymID(var_name(x).data())),
       ZEQ,
       F::make_binary(
-        F::make_lvar(UNTYPED, LVar<Allocator>(var_name(y).data())),
+        F::make_lvar(UNTYPED, SymID(var_name(y).data())),
         op,
-        F::make_lvar(UNTYPED, LVar<Allocator>(var_name(z).data())))));
+        F::make_lvar(UNTYPED, SymID(var_name(z).data())))));
   }
 
   // Optional search strategies, same encoding as the FlatZinc parser: search(var_order, indomain_<val_order>, vars...).
@@ -191,7 +191,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
         std::cerr << "TCN parser: invalid variable index in search strategy" << std::endl;
         return nullptr;
       }
-      search.push_back(F::make_lvar(UNTYPED, LVar<Allocator>(var_name(v).data())));
+      search.push_back(F::make_lvar(UNTYPED, SymID(var_name(v).data())));
     }
     conjuncts.push_back(F::make_nary(battery::string<Allocator>("search"), std::move(search)));
   }
@@ -199,7 +199,7 @@ parse_tcn(const std::string& filename, SolverOutput<Allocator>& output)
   // Objective goes last so all variables are declared before BAB interprets it.
   if(has_objective) {
     conjuncts.push_back(F::make_unary(MINIMIZE,
-      F::make_lvar(UNTYPED, LVar<Allocator>(var_name(obj_var).data()))));
+      F::make_lvar(UNTYPED, SymID(var_name(obj_var).data()))));
   }
 
   F formula = F::make_nary(AND, std::move(conjuncts));

@@ -21,13 +21,13 @@ class SolverOutput {
   using array_dim_t = bvector<battery::tuple<size_t,size_t>>;
   using F = TFormula<Allocator>;
 
-  bvector<bstring> output_vars;
+  bvector<SymID> output_vars;
   // For each array, we store its output dimension characteristics and the list of the variables in the array.
   // We also encode sets in the same vector (the Boolean is `true` if it is a set variable).
-  bvector<battery::tuple<bstring, bool, array_dim_t, bvector<bstring>>> output_arrays;
+  bvector<battery::tuple<bstring, bool, array_dim_t, bvector<SymID>>> output_arrays;
 
   OutputType type;
-  std::string join_str(const bvector<bstring>& vec, const std::string& separator,  std::function<std::string(const bstring&)> toString) const {
+  std::string join_str(const bvector<SymID>& vec, const std::string& separator,  std::function<std::string(const SymID&)> toString) const {
     std::string result;
     for (size_t i = 0; i < vec.size(); ++i) {
       result += toString(vec[i]);
@@ -69,7 +69,7 @@ public:
     , output_arrays(other.output_arrays, allocator),type(other.type)
   {}
 
-  void add_array_var(const std::string& name, const bstring& var_name, const peg::SemanticValues& sv) {
+  void add_array_var(const std::string& name, SymID var_name, const peg::SemanticValues& sv) {
     int idx = -1;
     auto array_name = bstring(name.data());
     for(int i = 0; i < output_arrays.size(); ++i) {
@@ -79,7 +79,7 @@ public:
       }
     }
     if(idx == -1) {
-      output_arrays.push_back(battery::make_tuple<bstring, bool, array_dim_t, bvector<bstring>>(bstring(array_name), false, {}, {}));
+      output_arrays.push_back(battery::make_tuple<bstring, bool, array_dim_t, bvector<SymID>>(bstring(array_name), false, {}, {}));
       idx = static_cast<int>(output_arrays.size()) - 1;
       // Add the dimension of the array.
       for(int i = 0; i < sv.size(); ++i) {
@@ -93,14 +93,14 @@ public:
     battery::get<3>(output_arrays[idx]).push_back(var_name);
   }
 
-  void add_var(const bstring& var_name) {
+  void add_var(SymID var_name) {
     output_vars.push_back(var_name);
   }
 
   class SimplifierIdentity {
     /** `b` is indexed by the first abstract variable of `vname` in `benv`; that is, `b` must be the abstract element in which the variables were first declared. */
-    template <class Alloc, class B, class Env>
-    CUDA void print_variable(const LVar<Alloc>& vname, const Env& benv, const B& b) const {
+    template <class B, class Env>
+    CUDA void print_variable(SymID vname, const Env& benv, const B& b) const {
       const auto& x = *(benv.variable_of(vname));
       x.sort.print_value(b.project(x.avars[0].vid()));
     }
@@ -109,7 +109,8 @@ public:
   template <class Env, class A, class S>
   CUDA void print_solution_flatzinc(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
     for(int i = 0; i < output_vars.size(); ++i) {
-      printf("%s=", output_vars[i].data());
+      output_vars[i].print();
+      printf("=");
       simplifier.print_variable(output_vars[i], env, sol);
       printf(";\n");
     }
@@ -133,7 +134,7 @@ public:
 
   template<class Env, class A, class S>
   CUDA void print_solution_xml(const Env& env, const A& sol, const S& simplifier = SimplifierIdentity{}) const {
-    auto vars = join_str(output_vars, " ", [](const bstring& s) -> std::string { return s.data(); });
+    auto vars = join_str(output_vars, " ", [](const SymID& s) -> std::string { return s.str(); });
     printf("v <instantiation> <list>%s</list> <values>", vars.c_str());
     for (int i = 0; i < output_vars.size(); ++i) {
       simplifier.print_variable(output_vars[i], env, sol);

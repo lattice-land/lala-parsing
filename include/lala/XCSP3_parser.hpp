@@ -654,7 +654,7 @@ XCSP3_turbo_callbacks<Allocator>::F XCSP3_turbo_callbacks<Allocator>::make_formu
     case OSINH:
     case OCOSH:
     case OTANH: throw std::runtime_error("unsupported arithmetic operation");
-    case OVAR: return F::make_lvar(UNTYPED, LVar<Allocator>(static_cast<NodeVariable*>(node)->var.c_str()));
+    case OVAR: return F::make_lvar(UNTYPED, LVar(static_cast<NodeVariable*>(node)->var.c_str()));
     case OPAR:
     case OLONG:
     case ORATIONAL: throw std::runtime_error("unsupported constant");

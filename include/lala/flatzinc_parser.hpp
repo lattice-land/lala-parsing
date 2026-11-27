@@ -152,7 +152,7 @@ public:
     parser["LiteralArray"] = [](const SV &sv) { return sv; };
     parser["ParameterDecl"] = [this] (const SV &sv) { return make_parameter_decl(sv); };
     parser["PredicateDecl"] = [this] (const SV &sv) { return F(); };
-    parser["VariableLit"] = [](const SV &sv) { return F::make_lvar(UNTYPED, LVar<Allocator>(std::any_cast<std::string>(sv[0]))); };
+    parser["VariableLit"] = [](const SV &sv) { return F::make_lvar(UNTYPED, LVar(std::any_cast<std::string>(sv[0]))); };
     parser["IntType"] = [](const SV &sv) { return So(So::Int); };
     parser["RealType"] = [](const SV &sv) { return So(So::Real); };
     parser["BoolType"] = [](const SV &sv) { return So(So::Bool); };
@@ -310,7 +310,7 @@ public:
         }
         for(int i = 0; i < array.seq().size(); ++i) {
           decl.push_back(F::make_binary(
-            F::make_lvar(UNTYPED, LVar<Allocator>(make_array_access(name, i))),
+            F::make_lvar(UNTYPED, LVar(make_array_access(name, i))),
             eq_of_decl(decl[i]),
             array.seq(i)));
         }
@@ -701,7 +701,7 @@ public:
 
     F make_existential(const SV& sv, const So& ty, const std::string& name, const std::any& sv_annots) {
       auto f = F::make_exists(UNTYPED,
-        LVar<allocator_type>(name.data()),
+        LVar(name.data()),
         ty);
       auto annots = std::any_cast<SV>(sv_annots);
       return update_with_annotations(sv, f, annots);
@@ -719,7 +719,7 @@ public:
         Sig eq = eq_of_decl(var_decl);
         return F::make_binary(std::move(var_decl), AND,
           F::make_binary(
-            F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())),
+            F::make_lvar(UNTYPED, LVar(name.data())),
             eq,
             f(sv[3])));
       }
@@ -735,7 +735,7 @@ public:
       }
       catch(std::bad_any_cast) {
         auto typeValue = f(typeVar);
-        auto inConstraint = F::make_binary(F::make_lvar(UNTYPED, LVar<allocator_type>(name.data())), IN, typeValue);
+        auto inConstraint = F::make_binary(F::make_lvar(UNTYPED, LVar(name.data())), IN, typeValue);
         auto sort = typeValue.sort();
         if(!sort.has_value() || !sort->is_set()) {
           return make_error(sv, "We only allow type-value of variables to be of type Set.");
@@ -809,7 +809,7 @@ public:
                 seq.push_back(params[varName]);
               }
               else {
-                seq.push_back(F::make_lvar(UNTYPED, LVar<allocator_type>(varName.data())));
+                seq.push_back(F::make_lvar(UNTYPED, LVar(varName.data())));
               }
             }
           }
